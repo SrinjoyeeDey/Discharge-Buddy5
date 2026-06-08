@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useMemo, useEf
 import { useVoiceSession } from '@/hooks/assistant/useVoiceSession';
 import { useAssistantContext } from '@/hooks/assistant/useAssistantContext';
 import { useAssistantEvents } from '@/hooks/assistant/useAssistantEvents';
-import { useApp } from '@/context/AppContext';
+import { useApp, type SymptomLog } from '@/context/AppContext';
 import { router } from 'expo-router';
 import * as Speech from 'expo-speech';
 import { LOCALE_BY_LANG, type Language } from '@/constants/translations';
@@ -86,6 +86,79 @@ function stripForSpeech(text: string): string {
     .trim();
 }
 
+const isBengaliText = (text: string) => /[\u0980-\u09FF]/.test(text);
+const isHindiText = (text: string) => /[\u0900-\u097F]/.test(text);
+
+const SYMPTOM_LOCALIZATION: Record<string, Record<string, string>> = {
+  en: {
+    Dizziness: 'dizziness',
+    Headache: 'headache',
+    Nausea: 'nausea',
+    Pain: 'pain',
+    Fever: 'fever',
+    Cough: 'cough',
+    Fatigue: 'fatigue',
+    'Shortness of Breath': 'shortness of breath',
+    Symptom: 'symptom',
+  },
+  bn: {
+    Dizziness: 'মাথা ঘোরা (dizziness)',
+    Headache: 'মাথা ব্যথা (headache)',
+    Nausea: 'বমি বমি ভাব (nausea)',
+    Pain: 'ব্যথা (pain)',
+    Fever: 'জ্বর (fever)',
+    Cough: 'কাশি (cough)',
+    Fatigue: 'দুর্বলতা (fatigue)',
+    'Shortness of Breath': 'শ্বাসকষ্ট (shortness of breath)',
+    Symptom: 'উপসর্গ (symptom)',
+  },
+  hi: {
+    Dizziness: 'चक्कर आना (dizziness)',
+    Headache: 'सिरदर्द (headache)',
+    Nausea: 'उल्टी सा लगना (nausea)',
+    Pain: 'दर्द (pain)',
+    Fever: 'बुखार (fever)',
+    Cough: 'खांसी (cough)',
+    Fatigue: 'थकान (fatigue)',
+    'Shortness of Breath': 'सांस लेने में तकलीफ (shortness of breath)',
+    Symptom: 'लक्षण (symptom)',
+  }
+};
+
+function extractSymptom(text: string, lang: string): string {
+  const t = text.toLowerCase();
+  
+  if (t.includes('ghur') || t.includes('dizzy') || t.includes('dizziness') || t.includes('dizi') || t.includes('giddiness')) {
+    return 'Dizziness';
+  }
+  if (t.includes('betha') || t.includes('byatha') || t.includes('pain') || t.includes('sore') || t.includes('hurt')) {
+    if (t.includes('matha') || t.includes('head')) {
+      return 'Headache';
+    }
+    return 'Pain';
+  }
+  if (t.includes('headache') || t.includes('head ache')) {
+    return 'Headache';
+  }
+  if (t.includes('bomi') || t.includes('nausea') || t.includes('vomit') || t.includes('vomiting')) {
+    return 'Nausea';
+  }
+  if (t.includes('jwor') || t.includes('jhor') || t.includes('fever') || t.includes('temp') || t.includes('temperature') || t.includes('bukhar')) {
+    return 'Fever';
+  }
+  if (t.includes('kashi') || t.includes('cough') || t.includes('cold') || t.includes('khansi')) {
+    return 'Cough';
+  }
+  if (t.includes('durbol') || t.includes('fatigue') || t.includes('tired') || t.includes('weak') || t.includes('thakan')) {
+    return 'Fatigue';
+  }
+  if (t.includes('sash') || t.includes('breath') || t.includes('sob') || t.includes('gasp') || t.includes('saf')) {
+    return 'Shortness of Breath';
+  }
+  
+  return 'Symptom';
+}
+
 export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AssistantState>('idle');
   const [isVisible, setIsVisible] = useState(false);
@@ -113,6 +186,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   // navigation or action clears it so we never loop forever.
   const continueConversationRef = useRef(false);
   const startAssistantRef = useRef<() => Promise<void>>(async () => {});
+  const pendingSymptomLogRef = useRef<{ symptom: string; lang: string } | null>(null);
 
   // ── Speak a phrase and resolve when playback finishes. ──
   const speak = useCallback(
@@ -123,18 +197,46 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
           resolve();
           return;
         }
+
+        let resolved = false;
+        const safeResolve = () => {
+          if (!resolved) {
+            resolved = true;
+            resolve();
+          }
+        };
+
+        // Safety timeout: average reading rate is ~12-15 chars per second.
+        // We set the timeout to clean.length / 12 * 1000 + 3000ms buffer.
+        const estimatedDurationMs = Math.max(3000, (clean.length / 12) * 1000);
+        const timeoutId = setTimeout(() => {
+          console.warn("[Assistant] TTS playback timed out after estimated duration:", estimatedDurationMs);
+          safeResolve();
+        }, estimatedDurationMs);
+
         try {
           Speech.stop();
           Speech.speak(clean, {
             language: localeOverride || LOCALE_BY_LANG[language] || 'en-US',
             pitch: 1.0,
             rate: 0.95,
-            onDone: () => resolve(),
-            onStopped: () => resolve(),
-            onError: () => resolve(),
+            onDone: () => {
+              clearTimeout(timeoutId);
+              safeResolve();
+            },
+            onStopped: () => {
+              clearTimeout(timeoutId);
+              safeResolve();
+            },
+            onError: () => {
+              clearTimeout(timeoutId);
+              safeResolve();
+            },
           });
-        } catch {
-          resolve();
+        } catch (e) {
+          console.warn("[Assistant] Speech.speak threw error:", e);
+          clearTimeout(timeoutId);
+          safeResolve();
         }
       }),
     [language],
@@ -196,12 +298,37 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         case 'LOG_SYMPTOM': {
-          reply = "Let's note down how you're feeling.";
+          const activeLang = isBengaliText(currentTranscript) ? 'bn' : (isHindiText(currentTranscript) ? 'hi' : language);
+          const symptomKey = extractSymptom(currentTranscript, activeLang);
+          
+          pendingSymptomLogRef.current = {
+            symptom: symptomKey,
+            lang: activeLang
+          };
+          
+          const localizedDict = SYMPTOM_LOCALIZATION[activeLang] || SYMPTOM_LOCALIZATION['en'];
+          const localizedSymptom = localizedDict[symptomKey] || symptomKey;
+          
+          let reply = '';
+          if (activeLang === 'bn') {
+            reply = `আপনার ${localizedSymptom} এর তীব্রতা ১ থেকে ৫ এর মধ্যে কত? ৫ হচ্ছে সবচেয়ে বেশি।`;
+          } else if (activeLang === 'hi') {
+            reply = `आपके ${localizedSymptom} की तीव्रता 1 से 5 के बीच कितनी है? 5 सबसे अधिक है।`;
+          } else {
+            reply = `How would you rate the severity of your ${localizedSymptom} from 1 to 5, with 5 being the most severe?`;
+          }
+          
+          router.push('/(tabs)/symptoms' as any);
+          
           setLastReply(reply);
           setState('speaking');
-          router.push('/(tabs)/symptoms' as any);
-          await speak(reply);
-          finish();
+          await speak(reply, LOCALE_BY_LANG[activeLang]);
+          
+          setTimeout(() => {
+            if (continueConversationRef.current) {
+              startAssistantRef.current();
+            }
+          }, 500);
           return;
         }
         case 'ADD_MEDICINE': {
@@ -291,13 +418,14 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const handleChat = useCallback(
     async (text: string): Promise<void> => {
       setState('processing');
+      const activeLang = isBengaliText(text) ? 'bn' : (isHindiText(text) ? 'hi' : language);
       let message = "I'm right here with you.";
       try {
         // Share the same persisted memory as the chat screen (Phase 5), and tell
         // the model which screen the user is on (Phase 7) for "what is this?".
         const priorHistory = await loadHistory(userKey);
         const screenHint = describeScreen(activeModule).hint;
-        const res = await api.getChatResponse(text, language, recentForPrompt(priorHistory), screenHint);
+        const res = await api.getChatResponse(text, activeLang, recentForPrompt(priorHistory), screenHint);
         if (res?.message) message = res.message;
       } catch {
         message = "I'm having a little trouble connecting right now. Please try again in a moment.";
@@ -310,11 +438,15 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
       setLastReply(message);
       setState('speaking');
-      await speak(message);
+      await speak(message, LOCALE_BY_LANG[activeLang]);
 
       // Keep the conversation going hands-free if the user hasn't cancelled.
       if (continueConversationRef.current) {
-        startAssistantRef.current();
+        setTimeout(() => {
+          if (continueConversationRef.current) {
+            startAssistantRef.current();
+          }
+        }, 500);
       } else {
         finish();
       }
@@ -325,6 +457,89 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     handleChatRef.current = handleChat;
   }, [handleChat]);
 
+  const handleSymptomSeverityRating = async (transcript: string) => {
+    if (!pendingSymptomLogRef.current) return;
+    
+    const { symptom, lang } = pendingSymptomLogRef.current;
+    const cleanText = transcript.toLowerCase().trim();
+    let severity = 0;
+    
+    const digitMatch = cleanText.match(/[1-5]/);
+    if (digitMatch) {
+      severity = parseInt(digitMatch[0], 10);
+    } else {
+      if (cleanText.includes('one') || cleanText.includes('ek') || cleanText.includes('এক')) severity = 1;
+      else if (cleanText.includes('two') || cleanText.includes('dui') || cleanText.includes('do') || cleanText.includes('দুই')) severity = 2;
+      else if (cleanText.includes('three') || cleanText.includes('tin') || cleanText.includes('teen') || cleanText.includes('তিন')) severity = 3;
+      else if (cleanText.includes('four') || cleanText.includes('char') || cleanText.includes('chaar') || cleanText.includes('চার')) severity = 4;
+      else if (cleanText.includes('five') || cleanText.includes('paanch') || cleanText.includes('pac') || cleanText.includes('পাঁচ')) severity = 5;
+    }
+    
+    if (severity >= 1 && severity <= 5) {
+      const newLog: SymptomLog = {
+        id: Math.random().toString(),
+        date: new Date().toISOString().split('T')[0],
+        symptoms: [symptom],
+        severity: severity,
+        notes: `Logged via Voice Assistant in ${lang === 'bn' ? 'Bengali' : (lang === 'hi' ? 'Hindi' : 'English')}.`,
+        riskLevel: severity >= 4 ? 'high' : (severity === 3 ? 'medium' : 'low'),
+      };
+      
+      try {
+        await api.addSymptomLog(newLog);
+      } catch (err) {
+        console.error("Failed to add symptom log:", err);
+      }
+      
+      pendingSymptomLogRef.current = null;
+      
+      const localizedDict = SYMPTOM_LOCALIZATION[lang] || SYMPTOM_LOCALIZATION['en'];
+      const localizedSymptom = localizedDict[symptom] || symptom;
+      
+      let reply = '';
+      if (lang === 'bn') {
+        reply = `তীব্রতা ${severity} এর সাথে আপনার ${localizedSymptom} যোগ করা হয়েছে। আপনার পরিবারের সদস্যদের সতর্ক করা হয়েছে।`;
+      } else if (lang === 'hi') {
+        reply = `Severity ${severity} के साथ आपका ${localizedSymptom} दर्ज कर लिया गया है। आपके परिवार को सूचित कर दिया गया है।`;
+      } else {
+        reply = `Logged ${localizedSymptom} with a severity rating of ${severity}. Caregiver and family alerts have been updated.`;
+      }
+      
+      setLastReply(reply);
+      setState('speaking');
+      await speak(reply, LOCALE_BY_LANG[lang as Language]);
+      
+      if (continueConversationRef.current) {
+        setTimeout(() => {
+          if (continueConversationRef.current) {
+            startAssistantRef.current();
+          }
+        }, 500);
+      } else {
+        finish();
+      }
+    } else {
+      let reply = '';
+      if (lang === 'bn') {
+        reply = 'দয়া করে আপনার উপসর্গের তীব্রতা ১ থেকে ৫ এর মধ্যে কত বলুন। ৫ হচ্ছে সবচেয়ে বেশি তীব্র।';
+      } else if (lang === 'hi') {
+        reply = 'कृपया अपने लक्षण की तीव्रता 1 से 5 के बीच बताएं, जहां 5 सबसे अधिक है।';
+      } else {
+        reply = "Please tell me a severity rating from 1 to 5, with 5 being the most severe.";
+      }
+      
+      setLastReply(reply);
+      setState('speaking');
+      await speak(reply, LOCALE_BY_LANG[lang as Language]);
+      
+      setTimeout(() => {
+        if (continueConversationRef.current) {
+          startAssistantRef.current();
+        }
+      }, 500);
+    }
+  };
+
   // ── The heart of the assistant: transcript → intent → action / answer. ──
   const handleTranscript = useCallback(
     async (text: string | null): Promise<void> => {
@@ -333,13 +548,27 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         setLastReply(null);
         setState('speaking');
         await speak("Sorry, I didn't catch that. Please try again.");
-        finish();
+        if (continueConversationRef.current) {
+          setTimeout(() => {
+            if (continueConversationRef.current) {
+              startAssistantRef.current();
+            }
+          }, 500);
+        } else {
+          finish();
+        }
         return;
       }
 
       const transcript = text.trim();
       setLastTranscript(transcript);
       events.publish('TRANSCRIPTION_SUCCESS', { text: transcript, context: activeModule });
+      
+      if (pendingSymptomLogRef.current) {
+        await handleSymptomSeverityRating(transcript);
+        return;
+      }
+      
       setState('processing');
 
       let result: { intent: string; target: string; confidence: number };

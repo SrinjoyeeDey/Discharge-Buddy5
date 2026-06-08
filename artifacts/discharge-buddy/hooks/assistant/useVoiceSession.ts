@@ -52,6 +52,7 @@ export function useVoiceSession(options?: VoiceSessionOptions): VoiceSessionHook
   // VAD tracking
   const hasSpokenRef = useRef(false);
   const silenceStartRef = useRef<number | null>(null);
+  const sessionStartRef = useRef<number | null>(null);
   const speechThresholdDb = -30;
   const silenceThresholdDb = -45;
   const silenceTimeoutMs = 1500;
@@ -140,6 +141,7 @@ export function useVoiceSession(options?: VoiceSessionOptions): VoiceSessionHook
       isTranscribingRef.current = false;
       hasSpokenRef.current = false;
       silenceStartRef.current = null;
+      sessionStartRef.current = Date.now();
       meteringSharedValue.value = -160;
 
       const { status } = await Audio.requestPermissionsAsync();
@@ -191,6 +193,9 @@ export function useVoiceSession(options?: VoiceSessionOptions): VoiceSessionHook
           if (!hasSpokenRef.current) {
             if (db > speechThresholdDb) {
               hasSpokenRef.current = true;
+            } else if (sessionStartRef.current && (now - sessionStartRef.current >= 5000)) {
+              console.log("[VoiceSession] No speech detected for 5 seconds. Stopping.");
+              stopAndTranscribeRef.current();
             }
           } else {
             if (db < silenceThresholdDb) {
