@@ -51,12 +51,12 @@ export class ApiProvider implements IDataProvider {
 
   // Not implemented on backend yet, fallback to empty array
   async getFollowUps(): Promise<FollowUp[]> {
-    const res = await customFetch<{ data: FollowUp[] }>("/api/followups/");
+    const res = await customFetch<{ data: FollowUp[] }>("/api/followups");
     return res.data;
   }
   
   async addFollowUp(followUp: FollowUp): Promise<void> {
-    await customFetch("/api/followups/", {
+    await customFetch("/api/followups", {
       method: "POST",
       body: JSON.stringify({
         title: followUp.title,
