@@ -269,4 +269,27 @@ export class ApiProvider implements IDataProvider {
     });
   }
 
+  async scheduleVoiceReminder(data: { patientId: string; medicineName?: string; messageText: string; audioBase64?: string; scheduledTime: string }): Promise<{ success: boolean; reminder: any }> {
+    return await customFetch<{ success: boolean; reminder: any }>("/api/voice-notes/schedule", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getScheduledVoiceReminders(): Promise<any[]> {
+    const res = await customFetch<{ reminders: any[] }>("/api/voice-notes/scheduled");
+    return res.reminders;
+  }
+
+  async getDueVoiceReminders(): Promise<any[]> {
+    const res = await customFetch<{ reminders: any[] }>("/api/voice-notes/due");
+    return res.reminders;
+  }
+
+  async markVoiceReminderDelivered(id: string): Promise<void> {
+    await customFetch(`/api/voice-notes/reminders/${id}/delivered`, {
+      method: "PUT",
+    });
+  }
+
 }

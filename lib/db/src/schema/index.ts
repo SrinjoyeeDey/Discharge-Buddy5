@@ -200,6 +200,19 @@ export const dischargePlans = pgTable("discharge_plans", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Scheduled Voice Reminders for Caregivers/Family to Patients
+export const scheduledVoiceReminders = pgTable("scheduled_voice_reminders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  senderId: uuid("sender_id").references(() => users.id).notNull(),
+  patientId: uuid("patient_id").references(() => patients.id).notNull(),
+  medicineName: text("medicine_name"),
+  messageText: text("message_text").notNull(),
+  audioBase64: text("audio_base64"),
+  scheduledTime: timestamp("scheduled_time").notNull(),
+  isDelivered: boolean("is_delivered").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Zod schemas for validation
 export const insertUserSchema = createInsertSchema(users);
 export const selectUserSchema = createSelectSchema(users);
@@ -215,3 +228,5 @@ export const insertRecoveryLogSchema = createInsertSchema(recoveryLogs);
 export const insertPrescriptionSchema = createInsertSchema(prescriptions);
 export const insertFeedbackSchema = createInsertSchema(feedback);
 export const insertDischargePlanSchema = createInsertSchema(dischargePlans);
+export const insertScheduledVoiceReminderSchema = createInsertSchema(scheduledVoiceReminders);
+export const selectScheduledVoiceReminderSchema = createSelectSchema(scheduledVoiceReminders);

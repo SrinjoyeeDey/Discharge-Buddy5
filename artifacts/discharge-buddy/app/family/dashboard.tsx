@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Dimensions, ActivityIndicator, Alert, StatusBar, Platform, Image, Linking, Text as RNText } from 'react-native';
 import { TranslateText as Text } from '@/components/TranslateText';
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -135,6 +137,16 @@ function AddMemberModal({
                 autoCorrect={false}
                 placeholderTextColor={TEXT_MUTED}
               />
+              <TouchableOpacity
+                style={styles.scanQrBtn}
+                onPress={() => {
+                  onClose();
+                  router.push('/scan-qr');
+                }}
+              >
+                <Feather name="camera" size={16} color={PURPLE} />
+                <Text style={styles.scanQrBtnText}>Scan Patient's QR Code</Text>
+              </TouchableOpacity>
             </>
           )}
 
@@ -151,17 +163,305 @@ function AddMemberModal({
   );
 }
 
+// ── Schedule Voice Reminder Modal ──────────────────────────────────────────
+interface ScheduleVoiceReminderModalProps {
+  visible: boolean;
+  onClose: () => void;
+  patientsList: Patient[];
+  onScheduled: () => void;
+}
+
+function ScheduleVoiceReminderModal({ visible, onClose, patientsList, onScheduled }: ScheduleVoiceReminderModalProps) {
+  const { api, language } = useApp();
+  const [selectedPatientId, setSelectedPatientId] = useState('');
+  const [medicineName, setMedicineName] = useState('');
+  const [messageText, setMessageText] = useState('');
+  const [audioBase64, setAudioBase64] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [scheduledHoursAhead, setScheduledHoursAhead] = useState('1');
+  const [isSaving, setIsSaving] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+
+  const reset = () => {
+    setSelectedPatientId('');
+    setMedicineName('');
+    setMessageText('');
+    setAudioBase64(null);
+    setIsRecording(false);
+    setRecording(null);
+    setScheduledHoursAhead('1');
+    setIsSaving(false);
+    setTranscribing(false);
+  };
+
+  const startRecording = async () => {
+    try {
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Microphone permission is required to record a voice message.');
+        return;
+      }
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+      const recordOptions = {
+        android: {
+          extension: '.m4a',
+          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+          audioEncoder: Audio.AndroidAudioEncoder.AAC,
+          sampleRate: 44100,
+          numberOfChannels: 1,
+          bitRate: 128000,
+        },
+        ios: {
+          extension: '.m4a',
+          outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+          audioQuality: Audio.IOSAudioQuality.HIGH,
+          sampleRate: 44100,
+          numberOfChannels: 1,
+          bitRate: 128000,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
+        },
+        web: {
+          mimeType: 'audio/webm',
+        },
+      };
+      const { recording: newRecording } = await Audio.Recording.createAsync(recordOptions);
+      setRecording(newRecording);
+      setIsRecording(true);
+    } catch (e: any) {
+      console.warn("Failed to start recording:", e);
+      Alert.alert('Error', 'Could not start recording.');
+    }
+  };
+
+  const stopRecording = async () => {
+    if (!recording) return;
+    setIsRecording(false);
+    setTranscribing(true);
+    try {
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      if (uri) {
+        const base64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        setAudioBase64(base64);
+        
+        const fileExtension = Platform.OS === 'web' ? 'webm' : 'm4a';
+        const transcript = await api.transcribeAudio(base64, fileExtension, language);
+        if (transcript) {
+          setMessageText(transcript);
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to stop recording:", e);
+      Alert.alert('Error', 'Failed to save voice note.');
+    } finally {
+      setRecording(null);
+      setTranscribing(false);
+    }
+  };
+
+  const handleSchedule = async () => {
+    if (!selectedPatientId) {
+      Alert.alert('Required', 'Please select a family member.');
+      return;
+    }
+    if (!messageText.trim()) {
+      Alert.alert('Required', 'Please record a voice message or type instructions.');
+      return;
+    }
+    
+    setIsSaving(true);
+    try {
+      const hours = parseFloat(scheduledHoursAhead) || 1;
+      const scheduledTime = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+      
+      await api.scheduleVoiceReminder({
+        patientId: selectedPatientId,
+        medicineName: medicineName.trim() || undefined,
+        messageText: messageText.trim(),
+        audioBase64: audioBase64 || undefined,
+        scheduledTime,
+      });
+      
+      Alert.alert('Success', 'Voice reminder scheduled successfully.');
+      onScheduled();
+      reset();
+      onClose();
+    } catch (e: any) {
+      console.warn("Failed to schedule reminder:", e);
+      Alert.alert('Error', e.message || 'Failed to schedule reminder.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { reset(); onClose(); }}>
+      <View style={styles.overlay}>
+        <View style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>Schedule Voice Reminder</Text>
+            <TouchableOpacity onPress={() => { reset(); onClose(); }} style={styles.sheetClose}>
+              <Feather name="x" size={20} color={TEXT_MUTED} />
+            </TouchableOpacity>
+          </View>
+          
+          <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
+            <Text style={styles.fieldLabel}>Select Family Member *</Text>
+            <View style={styles.patientPickerContainer}>
+              {patientsList.map(p => (
+                <TouchableOpacity
+                  key={p.id}
+                  style={[
+                    styles.patientPickerItem,
+                    selectedPatientId === p.id && styles.patientPickerItemActive
+                  ]}
+                  onPress={() => setSelectedPatientId(p.id)}
+                >
+                  <Text style={[
+                    styles.patientPickerItemText,
+                    selectedPatientId === p.id && styles.patientPickerItemTextActive
+                  ]}>{p.name} ({p.relation || 'Member'})</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.fieldLabel}>Medicine Name (Optional)</Text>
+            <TextInput
+              style={styles.field}
+              placeholder="e.g. Metformin 500mg"
+              value={medicineName}
+              onChangeText={setMedicineName}
+              placeholderTextColor={TEXT_MUTED}
+            />
+
+            <Text style={styles.fieldLabel}>Deliver In (Hours from now) *</Text>
+            <View style={styles.presetContainer}>
+              {[
+                { label: '30 Mins', value: '0.5' },
+                { label: '1 Hour', value: '1' },
+                { label: '2 Hours', value: '2' },
+                { label: '4 Hours', value: '4' },
+                { label: 'Before Lunch', value: '3' },
+              ].map(p => (
+                <TouchableOpacity
+                  key={p.value}
+                  style={[
+                    styles.presetBtn,
+                    scheduledHoursAhead === p.value && styles.presetBtnActive
+                  ]}
+                  onPress={() => setScheduledHoursAhead(p.value)}
+                >
+                  <Text style={[
+                    styles.presetText,
+                    scheduledHoursAhead === p.value && styles.presetTextActive
+                  ]}>{p.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.fieldLabel}>Voice Message & Text Fallback *</Text>
+            <View style={styles.voiceRecordSection}>
+              {isRecording ? (
+                <TouchableOpacity style={styles.recordingBtnActive} onPress={stopRecording}>
+                  <Feather name="square" size={24} color="#fff" />
+                  <Text style={styles.recordingBtnText}>Stop & Save</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.recordingBtn} onPress={startRecording} disabled={transcribing}>
+                  <Feather name="mic" size={24} color="#fff" />
+                  <Text style={styles.recordingBtnText}>Record Voice Note</Text>
+                </TouchableOpacity>
+              )}
+              
+              {transcribing && (
+                <View style={styles.loaderRow}>
+                  <ActivityIndicator size="small" color={PURPLE} />
+                  <Text style={styles.transcribingText}>Transcribing voice note...</Text>
+                </View>
+              )}
+
+              {audioBase64 && !transcribing && (
+                <View style={styles.recordedStatus}>
+                  <Feather name="check" size={16} color="#10B981" />
+                  <Text style={styles.recordedStatusText}>Voice note attached!</Text>
+                </View>
+              )}
+            </View>
+
+            <TextInput
+              style={[styles.field, { height: 80, textAlignVertical: 'top', marginTop: 10 }]}
+              placeholder="Instructions (e.g. Please take Metformin before eating lunch today)"
+              value={messageText}
+              onChangeText={setMessageText}
+              multiline
+              placeholderTextColor={TEXT_MUTED}
+            />
+
+            <TouchableOpacity
+              style={[styles.submitBtn, (isSaving || transcribing) && { opacity: 0.7 }]}
+              onPress={handleSchedule}
+              disabled={isSaving || transcribing}
+            >
+              {isSaving ? <ActivityIndicator color="#fff" /> : (
+                <Text style={styles.submitBtnText}>Schedule Reminder</Text>
+              )}
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 // ── Main Dashboard ───────────────────────────────────────────────────────────
 export default function FamilyDashboard() {
   const insets = useSafeAreaInsets();
   const {
     user, familyMembers, addFamilyMember, linkFamilyMember, linkPatientByCode,
-    setActivePatientId, activePatientId, logout, speakNeural, isOnboarded, setOnboarded
+    setActivePatientId, activePatientId, logout, speakNeural, isOnboarded, setOnboarded, api, notifications, isInitializing
   } = useApp();
   const { open: openSidebar } = useSidebar();
 
   const [modalVisible, setModalVisible] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
+  const [reminders, setReminders] = useState<any[]>([]);
+  const [remindersLoading, setRemindersLoading] = useState(false);
+
+  const fetchReminders = async () => {
+    setRemindersLoading(true);
+    try {
+      const data = await api.getScheduledVoiceReminders();
+      setReminders(data || []);
+    } catch (e) {
+      console.warn("Failed to fetch reminders:", e);
+    } finally {
+      setRemindersLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchReminders();
+  }, []);
+
+  // While the session is still being restored, don't bounce to login —
+  // user/role may be populated a moment later. Show a loader instead.
+  if (isInitializing) {
+    return (
+      <View style={[styles.root, { alignItems: 'center', justifyContent: 'center' }]}>
+        <ActivityIndicator size="large" color={PURPLE} />
+      </View>
+    );
+  }
 
   if (!isOnboarded) {
     import('expo-router').then(m => m.router.replace('/onboarding'));
@@ -238,6 +538,20 @@ export default function FamilyDashboard() {
 
   const progressPct = totalDoses > 0 ? (completedDoses / totalDoses) * 100 : 0;
 
+  // Build real Reminders & Alerts from each member's pending / missed doses
+  const realAlerts = familyMembers.flatMap(m =>
+    (m.doseLogs || [])
+      .filter(d => d.status === 'pending' || d.status === 'missed')
+      .map(d => ({
+        key: d.id,
+        memberName: m.name,
+        initials: m.name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase(),
+        medicineName: d.medicineName,
+        scheduledTime: d.scheduledTime,
+        missed: d.status === 'missed',
+      }))
+  ).slice(0, 6);
+
   return (
     <View style={styles.root}>
       <StatusBar barStyle="dark-content" backgroundColor={BG} />
@@ -248,16 +562,27 @@ export default function FamilyDashboard() {
           <Feather name="menu" size={24} color={TEXT_DARK} />
         </TouchableOpacity>
         <View style={styles.appBarRight}>
-          <TouchableOpacity style={styles.iconBtn}>
-            <Feather name="bell" size={22} color={TEXT_DARK} />
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>3</Text>
-            </View>
-          </TouchableOpacity>
+          {(() => {
+            const unreadCount = notifications.flatMap(g => g.items).filter(i => !i.read).length;
+            return (
+              <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/notifications')}>
+                <Feather name="bell" size={22} color={TEXT_DARK} />
+                {unreadCount > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{unreadCount}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })()}
           <TouchableOpacity style={styles.avatarBtn} onPress={() => router.push('/profile')}>
              {/* Use a default avatar or user's photo */}
             <View style={styles.avatarSmall}>
-               <Text style={styles.avatarSmallText}>{user?.name?.charAt(0) || 'U'}</Text>
+               {user?.avatar || user?.profilePicture ? (
+                 <Image source={{ uri: user?.avatar || user?.profilePicture }} style={{ width: 36, height: 36, borderRadius: 18 }} />
+               ) : (
+                 <Text style={styles.avatarSmallText}>{user?.name?.charAt(0) || 'U'}</Text>
+               )}
             </View>
           </TouchableOpacity>
         </View>
@@ -281,7 +606,7 @@ export default function FamilyDashboard() {
         {/* ── Family Members Section ── */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Family Members</Text>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => setModalVisible(true)}>
             <Text style={styles.viewAllText}>View all</Text>
           </TouchableOpacity>
         </View>
@@ -316,6 +641,15 @@ export default function FamilyDashboard() {
                  </View>
               </View>
               <Text style={[styles.familyItemName, { color: PURPLE }]}>Add</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.familyItem} onPress={() => router.push('/scan-qr')}>
+              <View style={[styles.familyAvatarContainer, { borderWidth: 1, borderColor: '#CBD5E1', borderStyle: 'dashed' }]}>
+                 <View style={[styles.familyAvatar, { backgroundColor: '#F8FAFC' }]}>
+                    <Feather name="camera" size={24} color={PURPLE} />
+                 </View>
+              </View>
+              <Text style={[styles.familyItemName, { color: PURPLE }]}>Scan QR</Text>
           </TouchableOpacity>
         </ScrollView>
 
@@ -381,48 +715,118 @@ export default function FamilyDashboard() {
           ))}
         </View>
 
+        {/* ── Scheduled Voice Reminders ── */}
+        <View style={styles.reminderHeader}>
+          <Text style={styles.sectionTitle}>Scheduled Voice Reminders</Text>
+          <TouchableOpacity onPress={() => setScheduleModalVisible(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Feather name="plus-circle" size={16} color={PURPLE} />
+            <Text style={styles.viewAllText}>Schedule</Text>
+          </TouchableOpacity>
+        </View>
+
+        {remindersLoading ? (
+          <ActivityIndicator color={PURPLE} style={{ marginVertical: 12 }} />
+        ) : reminders.length === 0 ? (
+          <View style={[styles.alertCard, { justifyContent: 'center', paddingVertical: 24, marginBottom: 16 }]}>
+            <Text style={[styles.alertDesc, { textAlign: 'center' }]}>No voice reminders scheduled yet.</Text>
+          </View>
+        ) : (
+          <View style={[styles.reminderList, { marginBottom: 16 }]}>
+            {reminders.map((r) => {
+              const patientObj = familyMembers.find(m => m.id === r.patientId);
+              const patientName = patientObj ? patientObj.name : 'Family Member';
+              const formattedTime = new Date(r.scheduledTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              const formattedDate = new Date(r.scheduledTime).toLocaleDateString([], { month: 'short', day: 'numeric' });
+              
+              return (
+                <View key={r.id} style={styles.reminderCard}>
+                  <View style={styles.reminderDetails}>
+                    <View style={styles.reminderRow}>
+                      <View style={[styles.statusBadge, r.isDelivered ? styles.statusBadgeDelivered : styles.statusBadgePending]}>
+                        <Text style={r.isDelivered ? styles.statusBadgeTextDelivered : styles.statusBadgeTextPending}>
+                          {r.isDelivered ? 'Delivered' : 'Pending'}
+                        </Text>
+                      </View>
+                      {r.medicineName && (
+                        <View style={styles.reminderPill}>
+                          <Text style={styles.reminderPillText}>{r.medicineName}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.reminderMsg} numberOfLines={2}>
+                      For {patientName}: "{r.messageText}"
+                    </Text>
+                    <Text style={styles.reminderTime}>
+                      Scheduled for {formattedDate} at {formattedTime}
+                    </Text>
+                  </View>
+
+                  {r.audioBase64 && (
+                    <TouchableOpacity 
+                      style={styles.playBtn} 
+                      onPress={async () => {
+                        try {
+                          await Audio.setAudioModeAsync({
+                            allowsRecordingIOS: false,
+                            playsInSilentModeIOS: true,
+                          });
+                          const dataUri = `data:audio/m4a;base64,${r.audioBase64}`;
+                          await Audio.Sound.createAsync(
+                            { uri: dataUri },
+                            { shouldPlay: true }
+                          );
+                        } catch (e) {
+                          console.warn("Failed to play audio:", e);
+                          Alert.alert('Playback Error', 'Could not play back this voice message.');
+                        }
+                      }}
+                    >
+                      <Feather name="play" size={16} color={PURPLE} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        )}
+
         {/* ── Reminders & Alerts ── */}
         <View style={[styles.sectionHeader, { marginTop: 24 }]}>
           <Text style={styles.sectionTitle}>Reminders & Alerts</Text>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/notifications')}>
             <Text style={styles.viewAllText}>View all</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.alertsContainer}>
-            {/* Example Alert 1 */}
-            <View style={styles.alertCard}>
-               <View style={styles.alertLeft}>
-                  <View style={[styles.alertAvatar, { backgroundColor: '#E0E7FF' }]}>
-                     <RNText style={[styles.familyInitials, { fontSize: 14 }]} numberOfLines={1} adjustsFontSizeToFit>RS</RNText>
+            {realAlerts.length === 0 ? (
+              <View style={[styles.alertCard, { justifyContent: 'center', paddingVertical: 24 }]}>
+                <Text style={[styles.alertDesc, { textAlign: 'center' }]}>No pending dose alerts right now.</Text>
+              </View>
+            ) : (
+              realAlerts.map(a => {
+                const time = new Date(a.scheduledTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                return (
+                  <View key={a.key} style={styles.alertCard}>
+                    <View style={styles.alertLeft}>
+                      <View style={[styles.alertAvatar, { backgroundColor: a.missed ? '#FCE7F3' : '#E0E7FF' }]}>
+                        <RNText style={[styles.familyInitials, { fontSize: 14 }]} numberOfLines={1} adjustsFontSizeToFit>{a.initials}</RNText>
+                      </View>
+                      <View style={styles.alertInfo}>
+                        <Text style={styles.alertName}>{a.memberName}</Text>
+                        <Text style={[styles.alertDesc, a.missed && { color: '#D97706' }]}>
+                          {a.missed ? `${a.medicineName} is pending` : `Take ${a.medicineName}`}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.alertRight}>
+                      <Text style={styles.alertTime}>{time}</Text>
+                      <Feather name="bell" size={16} color={a.missed ? '#D97706' : TEXT_MUTED} style={{ marginLeft: 8 }} />
+                    </View>
                   </View>
-                  <View style={styles.alertInfo}>
-                     <Text style={styles.alertName}>Rajesh Sharma</Text>
-                     <Text style={styles.alertDesc}>Take Metformin 500mg</Text>
-                  </View>
-               </View>
-               <View style={styles.alertRight}>
-                  <Text style={styles.alertTime}>9:00 AM</Text>
-                  <Feather name="bell" size={16} color={TEXT_MUTED} style={{ marginLeft: 8 }} />
-               </View>
-            </View>
-
-            {/* Example Alert 2 */}
-            <View style={styles.alertCard}>
-               <View style={styles.alertLeft}>
-                  <View style={[styles.alertAvatar, { backgroundColor: '#FCE7F3' }]}>
-                     <RNText style={[styles.familyInitials, { fontSize: 14 }]} numberOfLines={1} adjustsFontSizeToFit>SS</RNText>
-                  </View>
-                  <View style={styles.alertInfo}>
-                     <Text style={styles.alertName}>Sunita Sharma</Text>
-                     <Text style={[styles.alertDesc, { color: '#D97706' }]}>Amlodipine 5mg is pending</Text>
-                  </View>
-               </View>
-               <View style={styles.alertRight}>
-                  <Text style={styles.alertTime}>8:30 AM</Text>
-                  <Feather name="bell" size={16} color="#D97706" style={{ marginLeft: 8 }} />
-               </View>
-            </View>
+                );
+              })
+            )}
         </View>
 
       </ScrollView>
@@ -434,6 +838,12 @@ export default function FamilyDashboard() {
         onLink={handleLink}
         onLinkCode={handleLinkCode}
         loading={actionLoading}
+      />
+      <ScheduleVoiceReminderModal
+        visible={scheduleModalVisible}
+        onClose={() => setScheduleModalVisible(false)}
+        patientsList={familyMembers}
+        onScheduled={fetchReminders}
       />
       <Sidebar />
     </View>
@@ -575,4 +985,74 @@ const styles = StyleSheet.create({
     borderRadius: 16, alignItems: 'center', marginTop: 4,
   },
   submitBtnText: { color: '#fff', fontSize: 16, fontFamily: 'Inter_700Bold' },
+  presetContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
+  presetBtn: {
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
+    backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0'
+  },
+  presetBtnActive: { backgroundColor: PURPLE, borderColor: PURPLE },
+  presetText: { fontSize: 13, color: TEXT_MUTED, fontFamily: 'Inter_500Medium' },
+  presetTextActive: { color: '#fff' },
+  voiceRecordSection: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
+  recordingBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#EF4444',
+    paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14
+  },
+  recordingBtnActive: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#DC2626',
+    paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14,
+    shadowColor: '#EF4444', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 4
+  },
+  recordingBtnText: { color: '#fff', fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  recordedStatus: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  recordedStatusText: { fontSize: 13, color: '#10B981', fontFamily: 'Inter_500Medium' },
+  patientPickerContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
+  patientPickerItem: {
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
+    backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0'
+  },
+  patientPickerItemActive: { backgroundColor: PURPLE, borderColor: PURPLE },
+  patientPickerItemText: { fontSize: 13, color: TEXT_MUTED, fontFamily: 'Inter_500Medium' },
+  patientPickerItemTextActive: { color: '#fff' },
+  loaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
+  transcribingText: { fontSize: 13, color: TEXT_MUTED, fontFamily: 'Inter_500Medium' },
+  reminderHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24, marginBottom: 16 },
+  reminderList: { gap: 12 },
+  reminderCard: {
+    backgroundColor: CARD_BG, padding: 16, borderRadius: 20,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 6, elevation: 1,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'
+  },
+  reminderDetails: { flex: 1, marginRight: 12 },
+  reminderRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  reminderPill: {
+    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8,
+    backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0'
+  },
+  reminderPillText: { fontSize: 10, color: TEXT_MUTED, fontFamily: 'Inter_600SemiBold' },
+  reminderMsg: { fontSize: 14, color: TEXT_DARK, fontFamily: 'Inter_500Medium', marginTop: 6 },
+  reminderTime: { fontSize: 12, color: TEXT_MUTED, fontFamily: 'Inter_500Medium', marginTop: 4 },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  statusBadgePending: { backgroundColor: '#FEF3C7' },
+  statusBadgeDelivered: { backgroundColor: '#D1FAE5' },
+  statusBadgeTextPending: { fontSize: 11, color: '#D97706', fontFamily: 'Inter_600SemiBold' },
+  statusBadgeTextDelivered: { fontSize: 11, color: '#059669', fontFamily: 'Inter_600SemiBold' },
+  playBtn: { padding: 8, backgroundColor: '#EDE9FE', borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  scanQrBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: PURPLE,
+    borderRadius: 14,
+    paddingVertical: 12,
+    marginBottom: 14,
+    backgroundColor: PURPLE_LIGHT,
+  },
+  scanQrBtnText: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+    color: PURPLE,
+  },
 });

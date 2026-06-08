@@ -177,6 +177,7 @@ export interface AppUser {
   email: string;
   phone?: string;
   avatar?: string;
+  profilePicture?: string; // base64 profile image
   role: UserRole;
   isEmailVerified?: boolean;
   linkedPatientId?: string;
@@ -322,6 +323,10 @@ interface AppContextType {
   journalEntries: JournalEntry[];
   // Notifications
   notifications: NotifGroup[];
+  doseAlerts: boolean;
+  setDoseAlerts: (val: boolean) => void;
+  appAlerts: boolean;
+  setAppAlerts: (val: boolean) => void;
   // Drug interactions
   drugInteractions: DrugInteraction[];
   recoverySuggestion: { title: string; body: string; type: 'calm' | 'sleep' | 'reset' } | null;
@@ -397,6 +402,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [familyMembers, setFamilyMembers] = useState<Patient[]>([]);
   const [activePatientId, setActivePatientIdState] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotifGroup[]>([]);
+  const [doseAlerts, setDoseAlertsState] = useState(true);
+  const [appAlerts, setAppAlertsState] = useState(true);
   const [toast, setToast] = useState<{ visible: boolean; title: string; body: string }>({
     visible: false,
     title: "",
@@ -453,6 +460,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (data.streak) setStreak(data.streak);
         if (data.xp) setXP(data.xp);
         if (data.achievements) setAchievements(data.achievements);
+        if (data.doseAlerts !== undefined) setDoseAlertsState(data.doseAlerts);
+        if (data.appAlerts !== undefined) setAppAlertsState(data.appAlerts);
         if (data.notifications) setNotifications(data.notifications);
         else {
           // Default notifications if none saved
@@ -1023,6 +1032,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     showToast(item.title, item.body);
   }, [showToast]);
 
+  const setDoseAlerts = (val: boolean) => {
+    setDoseAlertsState(val);
+    saveData({ doseAlerts: val });
+  };
+
+  const setAppAlerts = (val: boolean) => {
+    setAppAlertsState(val);
+    saveData({ appAlerts: val });
+  };
+
   const resetOnboarding = () => {
     setIsOnboardedState(false);
     saveData({ isOnboarded: false });
@@ -1103,6 +1122,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addJournalEntry, awardXP, unlockAchievement, login, logout, resetOnboarding, switchProvider,
         getRecoveryTrends, simplifyInstruction, updateProfile, changePassword,
         notifications, clearAllNotifications, markNotificationRead, addNotification,
+        doseAlerts, setDoseAlerts, appAlerts, setAppAlerts,
         clearRecoverySuggestion,
         refreshData: loadData,
         addFamilyMember, linkFamilyMember, linkPatientByCode, setActivePatientId,

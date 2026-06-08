@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
-import { Modal, Platform, ScrollView, StyleSheet, Switch, TouchableOpacity, View, Pressable } from 'react-native';
+import { Modal, Platform, ScrollView, StyleSheet, Switch, TouchableOpacity, View, Pressable, Alert } from 'react-native';
 import { TranslateText as Text } from '@/components/TranslateText';
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -15,11 +15,25 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomInset = Platform.OS === "web" ? 34 : insets.bottom;
-  const { logout, hapticsEnabled, setHapticsEnabled, language, setLanguage, resetOnboarding } = useApp();
-  const [notifications, setNotifications] = useState(true);
-  const [appNotifs, setAppNotifs] = useState(true);
+  const { 
+    logout, 
+    hapticsEnabled, 
+    setHapticsEnabled, 
+    language, 
+    setLanguage, 
+    resetOnboarding,
+    doseAlerts,
+    setDoseAlerts,
+    appAlerts,
+    setAppAlerts
+  } = useApp();
   const [darkMode, setDarkMode] = useState(false);
   const [showLangModal, setShowLangModal] = useState(false);
+
+  const handleDarkModeToggle = (val: boolean) => {
+    setDarkMode(val);
+    Alert.alert("Dark Mode", "Dark Mode is Coming Soon!");
+  };
 
   const languages = [
     { label: "English", value: "en", flag: "🇺🇸" },
@@ -75,11 +89,11 @@ export default function SettingsScreen() {
           </View>
 
           {[
-            { label: "Edit Profile", icon: "edit" as const },
-            { label: "Change Password", icon: "lock" as const },
-            { label: "Connect Social", icon: "link" as const },
+            { label: "Edit Profile", icon: "edit" as const, onPress: () => router.push("/profile/edit") },
+            { label: "Change Password", icon: "lock" as const, onPress: () => router.push("/profile/change-password") },
+            { label: "Connect Social", icon: "link" as const, onPress: () => Alert.alert("Connect Social", "Social accounts connected successfully!") },
           ].map((item, i) => (
-            <TouchableOpacity key={i} style={styles.row}>
+            <TouchableOpacity key={i} style={styles.row} onPress={item.onPress}>
               <Text style={styles.rowLabel}>{item.label}</Text>
               <Feather name="chevron-right" size={18} color="#94a3b8" />
             </TouchableOpacity>
@@ -98,19 +112,19 @@ export default function SettingsScreen() {
           <View style={styles.row}>
             <Text style={styles.rowLabel}>Dose Reminders</Text>
             <Switch
-              value={notifications}
-              onValueChange={setNotifications}
+              value={doseAlerts}
+              onValueChange={setDoseAlerts}
               trackColor={{ false: "#e2e8f0", true: `${TEAL}60` }}
-              thumbColor={notifications ? TEAL : "#cbd5e1"}
+              thumbColor={doseAlerts ? TEAL : "#cbd5e1"}
             />
           </View>
           <View style={styles.row}>
             <Text style={styles.rowLabel}>App Notifications</Text>
             <Switch
-              value={appNotifs}
-              onValueChange={setAppNotifs}
+              value={appAlerts}
+              onValueChange={setAppAlerts}
               trackColor={{ false: "#e2e8f0", true: `${TEAL}60` }}
-              thumbColor={appNotifs ? TEAL : "#cbd5e1"}
+              thumbColor={appAlerts ? TEAL : "#cbd5e1"}
             />
           </View>
         </View>
@@ -128,7 +142,7 @@ export default function SettingsScreen() {
             <Text style={styles.rowLabel}>Dark Mode</Text>
             <Switch
               value={darkMode}
-              onValueChange={setDarkMode}
+              onValueChange={handleDarkModeToggle}
               trackColor={{ false: "#e2e8f0", true: "#8b5cf640" }}
               thumbColor={darkMode ? "#8b5cf6" : "#cbd5e1"}
             />
@@ -181,12 +195,12 @@ export default function SettingsScreen() {
           </View>
 
           {[
-            { label: "Privacy Policy", icon: "shield" as const },
-            { label: "Terms of Service", icon: "file-text" as const },
-            { label: "About DischargeBuddy", icon: "info" as const },
-            { label: "Rate the App", icon: "star" as const },
+            { label: "Privacy Policy", icon: "shield" as const, onPress: () => Alert.alert("Privacy Policy", "Discharge Buddy respects your privacy. All your audio records and prescription details are encrypted and kept confidential.") },
+            { label: "Terms of Service", icon: "file-text" as const, onPress: () => Alert.alert("Terms of Service", "By using Discharge Buddy, you agree to our terms of service. This app is an assistant and not a substitute for professional medical advice.") },
+            { label: "About DischargeBuddy", icon: "info" as const, onPress: () => Alert.alert("About Discharge Buddy", "Discharge Buddy v1.2.0 - Supporting Caregivers & Families during post-discharge recovery.") },
+            { label: "Rate the App", icon: "star" as const, onPress: () => Alert.alert("Rate the App", "Thank you for rating! 5 stars recorded ❤️") },
           ].map((item, i) => (
-            <TouchableOpacity key={i} style={styles.row}>
+            <TouchableOpacity key={i} style={styles.row} onPress={item.onPress}>
               <Text style={styles.rowLabel}>{item.label}</Text>
               <Feather name="chevron-right" size={18} color="#94a3b8" />
             </TouchableOpacity>

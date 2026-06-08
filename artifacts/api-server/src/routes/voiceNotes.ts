@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middlewares/auth";
-import { db, users, patients, eq } from "@workspace/db";
+import { db, users, patients, scheduledVoiceReminders, eq, and, lte, desc } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { sendPushNotification } from "../services/notificationService";
 
@@ -119,6 +119,109 @@ router.get("/", requireAuth, async (req: any, res: any) => {
   // Lightweight placeholder — returns empty array until DB table is wired.
   // The UI should gracefully handle an empty list with an empty state.
   return res.json({ notes: [] });
+});
+
+/**
+ * @route POST /api/voice-notes/schedule
+ * @desc  Schedule a voice reminder/note for a patient to be delivered at a specific time.
+ */
+router.post("/schedule", requireAuth, async (req: any, res: any) => {
+  const user = req.user;
+  const { patientId, medicineName, messageText, audioBase64, scheduledTime } = req.body;
+  
+  if (!patientId || !messageText || !scheduledTime) {
+    return res.status(400).json({ error: "patientId, messageText, and scheduledTime are required" });
+  }
+  
+  try {
+    const [inserted] = await db.insert(scheduledVoiceReminders).values({
+      senderId: user.id,
+      patientId,
+      medicineName: medicineName || null,
+      messageText,
+      audioBase64: audioBase64 || null,
+      scheduledTime: new Date(scheduledTime),
+      isDelivered: false
+    }).returning();
+    
+    return res.json({ success: true, reminder: inserted });
+  } catch (error: any) {
+    return res.status(500).json({ error: "Failed to schedule voice reminder", detail: error.message });
+  }
+});
+
+/**
+ * @route GET /api/voice-notes/scheduled
+ * @desc  Fetch scheduled voice reminders (by patientId or senderId).
+ */
+router.get("/scheduled", requireAuth, async (req: any, res: any) => {
+  const user = req.user;
+  try {
+    let reminders;
+    if (user.linkedPatientId) {
+      reminders = await db.select()
+        .from(scheduledVoiceReminders)
+        .where(eq(scheduledVoiceReminders.patientId, user.linkedPatientId))
+        .orderBy(desc(scheduledVoiceReminders.scheduledTime));
+    } else {
+      reminders = await db.select()
+        .from(scheduledVoiceReminders)
+        .where(eq(scheduledVoiceReminders.senderId, user.id))
+        .orderBy(desc(scheduledVoiceReminders.scheduledTime));
+    }
+    return res.json({ reminders });
+  } catch (error: any) {
+    return res.status(500).json({ error: "Failed to fetch scheduled reminders", detail: error.message });
+  }
+});
+
+/**
+ * @route GET /api/voice-notes/due
+ * @desc  Fetch voice reminders for the patient that are due (scheduledTime <= now) and not yet delivered.
+ */
+router.get("/due", requireAuth, async (req: any, res: any) => {
+  const user = req.user;
+  if (!user.linkedPatientId) {
+    return res.json({ reminders: [] });
+  }
+  
+  try {
+    const due = await db.select()
+      .from(scheduledVoiceReminders)
+      .where(
+        and(
+          eq(scheduledVoiceReminders.patientId, user.linkedPatientId),
+          eq(scheduledVoiceReminders.isDelivered, false),
+          lte(scheduledVoiceReminders.scheduledTime, new Date())
+        )
+      )
+      .orderBy(desc(scheduledVoiceReminders.scheduledTime));
+      
+    return res.json({ reminders: due });
+  } catch (error: any) {
+    return res.status(500).json({ error: "Failed to fetch due reminders", detail: error.message });
+  }
+});
+
+/**
+ * @route PUT /api/voice-notes/reminders/:id/delivered
+ * @desc  Mark a voice reminder as delivered so it won't be displayed/played again.
+ */
+router.put("/reminders/:id/delivered", requireAuth, async (req: any, res: any) => {
+  const { id } = req.params;
+  try {
+    const [updated] = await db.update(scheduledVoiceReminders)
+      .set({ isDelivered: true })
+      .where(eq(scheduledVoiceReminders.id, id))
+      .returning();
+      
+    if (!updated) {
+      return res.status(404).json({ error: "Reminder not found" });
+    }
+    return res.json({ success: true, reminder: updated });
+  } catch (error: any) {
+    return res.status(500).json({ error: "Failed to update reminder status", detail: error.message });
+  }
 });
 
 export default router;

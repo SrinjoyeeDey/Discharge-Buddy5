@@ -3,6 +3,7 @@ import {
   View,
   StyleSheet,
   TouchableOpacity,
+  TextInput,
   Platform,
   Dimensions,
   StatusBar,
@@ -132,6 +133,13 @@ export default function LoginScreen() {
   const [pendingEmail,  setPendingEmail]  = useState<string | undefined>(undefined);
   const [suggestedRole, setSuggestedRole] = useState<AppRole>('patient');
   const [isExpanded,   setIsExpanded]   = useState(false);
+
+  // Email/password form state
+  const [email,       setEmail]       = useState('');
+  const [password,    setPassword]    = useState('');
+  const [fullName,    setFullName]    = useState('');
+  const [showPass,    setShowPass]    = useState(false);
+  const [authMode,    setAuthMode]    = useState<'google' | 'email'>('email');
 
   // ── Gesture / Animation ──
   // translateY: SNAP_COLLAPSED = sheet at 42% height, SNAP_EXPANDED = sheet at 80%
@@ -286,6 +294,58 @@ export default function LoginScreen() {
     if (promptGoogleAsync) promptGoogleAsync();
   };
 
+  const handleEmailAuth = async () => {
+    setError(null);
+    if (!email.trim()) { setError('Please enter your email address'); return; }
+    if (!password.trim()) { setError('Please enter your password'); return; }
+    if (isSignUp && !fullName.trim()) { setError('Please enter your full name'); return; }
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsLoggingIn(true); setLoginProgress(0.4);
+    try {
+      const apiUrl = getApiUrl();
+      if (isSignUp) {
+        // Register
+        const res = await fetch(`${apiUrl}/api/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.trim(), name: fullName.trim(), password, role: 'patient' }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'Registration failed');
+        // Redirect to verify-email
+        setIsLoggingIn(false); setLoginProgress(0);
+        router.push({ pathname: '/verify-email', params: { email: email.trim() } } as any);
+      } else {
+        // Login
+        setLoginProgress(0.7);
+        const res = await fetch(`${apiUrl}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.trim(), password }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (d.error === 'EMAIL_NOT_VERIFIED') {
+            setIsLoggingIn(false); setLoginProgress(0);
+            router.push({ pathname: '/verify-email', params: { email: email.trim() } } as any);
+            return;
+          }
+          if (d.error === 'USE_GOOGLE_SIGNIN') {
+            throw new Error('This account was created with Google. Please use "Continue with Google".');
+          }
+          throw new Error(d.error || 'Login failed');
+        }
+        await login(d.user, d.token);
+        setLoginProgress(1);
+        setTimeout(() => handleTransitionToSuccess(d.user?.role), 100);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Authentication failed');
+      setIsLoggingIn(false); setLoginProgress(0);
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  };
+
   const runDemo = async (role: AppRole) => {
     setIsLoggingIn(true); setShowDemoModal(false);
     setTimeout(async () => {
@@ -341,8 +401,10 @@ export default function LoginScreen() {
             style={[styles.sheetContent, { paddingBottom: Math.max(insets.bottom + 48, 64) }]}
           >
             <View style={styles.textContent}>
-              <Text style={styles.title}>{isSignUp ? 'Create Account' : 'Sign in'}</Text>
-              <Text style={styles.subtitle}>Use your Google account to log in or create a new account.</Text>
+              <Text style={styles.title}>{isSignUp ? 'Create Account' : 'Welcome Back'}</Text>
+              <Text style={styles.subtitle}>
+                {isSignUp ? 'Sign up with email or Google' : 'Sign in with email or Google'}
+              </Text>
             </View>
 
             {!!error && (
@@ -359,6 +421,71 @@ export default function LoginScreen() {
               </Animated.View>
             ) : (
               <View style={styles.actionContainer}>
+
+                {/* ── Email/Password Form ── */}
+                {isSignUp && (
+                  <View style={styles.inputWrap}>
+                    <Feather name="user" size={16} color={MUTED} style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.emailInput}
+                      placeholder="Full name"
+                      placeholderTextColor={MUTED}
+                      value={fullName}
+                      onChangeText={setFullName}
+                      autoCapitalize="words"
+                    />
+                  </View>
+                )}
+                <View style={styles.inputWrap}>
+                  <Feather name="mail" size={16} color={MUTED} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.emailInput}
+                    placeholder="Email address"
+                    placeholderTextColor={MUTED}
+                    value={email}
+                    onChangeText={setEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+                <View style={styles.inputWrap}>
+                  <Feather name="lock" size={16} color={MUTED} style={styles.inputIcon} />
+                  <TextInput
+                    style={[styles.emailInput, { flex: 1 }]}
+                    placeholder="Password"
+                    placeholderTextColor={MUTED}
+                    value={password}
+                    onChangeText={setPassword}
+                    secureTextEntry={!showPass}
+                  />
+                  <TouchableOpacity onPress={() => setShowPass(v => !v)} style={{ paddingRight: 14 }}>
+                    <Feather name={showPass ? 'eye-off' : 'eye'} size={16} color={MUTED} />
+                  </TouchableOpacity>
+                </View>
+
+                {!isSignUp && (
+                  <TouchableOpacity
+                    onPress={() => router.push('/forgot-password' as any)}
+                    style={styles.forgotLink}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.forgotText}>Forgot password?</Text>
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity onPress={handleEmailAuth} activeOpacity={0.85} style={styles.emailSubmitBtn}>
+                  <Text style={styles.emailSubmitText}>{isSignUp ? 'Create Account' : 'Sign In'}</Text>
+                </TouchableOpacity>
+
+                {/* Divider */}
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>or</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                {/* Google */}
                 <GlareHover
                   width="100%"
                   glareColor="#ffffff"
@@ -379,7 +506,7 @@ export default function LoginScreen() {
                   <Text style={styles.toggleText}>
                     {isSignUp ? 'Already have an account?' : "Don't have an account?"}
                   </Text>
-                  <TouchableOpacity onPress={() => setIsSignUp(!isSignUp)} activeOpacity={0.7}>
+                  <TouchableOpacity onPress={() => { setIsSignUp(!isSignUp); setError(null); }} activeOpacity={0.7}>
                     <Text style={styles.toggleLink}>{isSignUp ? 'Sign in' : 'Sign up'}</Text>
                   </TouchableOpacity>
                 </View>
@@ -521,18 +648,42 @@ const styles = StyleSheet.create({
 
   // Action buttons
   actionContainer: { width: '100%', alignItems: 'center' },
+
+  // Email inputs
+  inputWrap: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#F8FAFC', borderRadius: 14,
+    borderWidth: 1.5, borderColor: '#E2E8F0',
+    marginBottom: 12, width: '100%',
+  },
+  inputIcon: { paddingLeft: 14 },
+  emailInput: {
+    flex: 1, paddingVertical: 14, paddingHorizontal: 10,
+    fontSize: 15, fontFamily: 'Inter_500Medium', color: TEXT_DARK,
+  },
+  forgotLink: { alignSelf: 'flex-end', marginBottom: 8, marginTop: -4 },
+  forgotText: { color: PRIMARY_COLOR, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  emailSubmitBtn: {
+    backgroundColor: PRIMARY_COLOR, paddingVertical: 16, borderRadius: 50,
+    alignItems: 'center', width: '100%', marginBottom: 16,
+  },
+  emailSubmitText: { color: WHITE, fontSize: 16, fontFamily: 'Inter_700Bold' },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, width: '100%', marginBottom: 14 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: '#E2E8F0' },
+  dividerText: { color: MUTED, fontSize: 13, fontFamily: 'Inter_500Medium' },
+
   googleBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#F8FAFC', paddingVertical: 18, borderRadius: 16,
+    backgroundColor: '#F8FAFC', paddingVertical: 16, borderRadius: 16,
     borderWidth: 1.5, borderColor: '#E2E8F0', width: '100%', gap: 12,
   },
-  googleBtnText: { color: TEXT_DARK, fontSize: 16, fontFamily: 'Inter_600SemiBold', flexShrink: 1 },
+  googleBtnText: { color: TEXT_DARK, fontSize: 15, fontFamily: 'Inter_600SemiBold', flexShrink: 1 },
 
-  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 20 },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16 },
   toggleText: { color: MUTED, fontSize: 14, fontFamily: 'Inter_500Medium' },
   toggleLink: { color: PRIMARY_COLOR, fontSize: 14, fontFamily: 'Inter_700Bold' },
 
-  devOptions: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 22 },
+  devOptions: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 18 },
   devBtn: { padding: 4 },
   devText: { color: MUTED, fontSize: 13, fontFamily: 'Inter_500Medium', textDecorationLine: 'underline' },
 

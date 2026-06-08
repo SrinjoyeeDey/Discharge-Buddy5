@@ -19,11 +19,12 @@ export default function NotificationsScreen() {
   const { 
     notifications, 
     clearAllNotifications, 
-    markNotificationRead 
+    markNotificationRead,
+    doseAlerts,
+    setDoseAlerts,
+    appAlerts,
+    setAppAlerts
   } = useApp();
-
-  const [doseAlerts, setDoseAlerts] = useState(true);
-  const [appAlerts, setAppAlerts] = useState(true);
 
   const unreadCount = notifications.flatMap(g => g.items).filter(i => !i.read).length;
   const hasNotifs = notifications.some(g => g.items.length > 0);

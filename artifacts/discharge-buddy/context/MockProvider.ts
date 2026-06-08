@@ -404,4 +404,21 @@ export class MockProvider implements IDataProvider {
     console.log("[MockProvider] sendVoiceNote:", transcript, patientNote);
     return { success: true, message: "Note sent (mock)" };
   }
+
+  async scheduleVoiceReminder(data: { patientId: string; medicineName?: string; messageText: string; audioBase64?: string; scheduledTime: string }): Promise<{ success: boolean; reminder: any }> {
+    console.log("[MockProvider] scheduleVoiceReminder:", data);
+    return { success: true, reminder: { id: "mock-reminder-id", ...data, isDelivered: false, createdAt: new Date().toISOString() } };
+  }
+
+  async getScheduledVoiceReminders(): Promise<any[]> {
+    return [];
+  }
+
+  async getDueVoiceReminders(): Promise<any[]> {
+    return [];
+  }
+
+  async markVoiceReminderDelivered(id: string): Promise<void> {
+    console.log("[MockProvider] markVoiceReminderDelivered:", id);
+  }
 }

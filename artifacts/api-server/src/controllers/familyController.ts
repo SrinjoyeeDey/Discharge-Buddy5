@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { db, patients, users, eq } from "@workspace/db";
+import { db, patients, users, medicines, doseLogs, symptomLogs, followUps, eq, inArray } from "@workspace/db";
 import type { AuthRequest } from "../middlewares/auth";
 import { logger } from "../lib/logger";
 import { getManagedPatients } from "../lib/managedPatients";
@@ -13,9 +13,42 @@ export class FamilyController {
     try {
       if (!req.user) return res.status(401).json({ error: "Unauthorized" });
 
-      const members = await getManagedPatients(req.user.id);
+      const linkedPatients = await getManagedPatients(req.user.id);
+      if (linkedPatients.length === 0) {
+        return res.json({ members: [] });
+      }
 
-      return res.json({ members });
+      const patientIds = linkedPatients.map(p => p.id);
+
+      // Fetch all nested relations in parallel
+      const [allMedicines, allSymptomLogs, allFollowUps] = await Promise.all([
+        db.select().from(medicines).where(inArray(medicines.patientId, patientIds)),
+        db.select().from(symptomLogs).where(inArray(symptomLogs.patientId, patientIds)),
+        db.select().from(followUps).where(inArray(followUps.patientId, patientIds)),
+      ]);
+
+      const allMedicineIds = allMedicines.map(m => m.id);
+      const allDoseLogs = allMedicineIds.length > 0 
+        ? await db.select().from(doseLogs).where(inArray(doseLogs.medicineId, allMedicineIds))
+        : [];
+
+      const formattedMembers = linkedPatients.map(p => {
+        const pMeds = allMedicines.filter(m => m.patientId === p.id);
+        const medIds = pMeds.map(m => m.id);
+        const pDoseLogs = allDoseLogs.filter(d => medIds.includes(d.medicineId));
+        const pSymptomLogs = allSymptomLogs.filter(s => s.patientId === p.id);
+        const pFollowUps = allFollowUps.filter(f => f.patientId === p.id);
+
+        return {
+          ...p,
+          medicines: pMeds,
+          doseLogs: pDoseLogs,
+          symptomLogs: pSymptomLogs,
+          followUps: pFollowUps
+        };
+      });
+
+      return res.json({ members: formattedMembers });
     } catch (error: any) {
       logger.error({ error: error.message }, "[FamilyController] getMembers failed");
       return res.status(500).json({ error: "Failed to fetch family members", detail: error.message });

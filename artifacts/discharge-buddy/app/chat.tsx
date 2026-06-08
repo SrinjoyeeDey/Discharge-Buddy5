@@ -102,8 +102,6 @@ export default function ChatScreen() {
     setInput("");
     setIsLoading(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    addNotification({ title: "Debug", body: `Sending: ${userMsg.text.substring(0, 20)}`, icon: "message-square", color: "#6C47FF" });
-
     console.log("[ChatScreen] handleSend triggered with input:", userMsg.text);
     try {
       // Pass recent conversation so Buddy can resolve follow-ups (Phase 5).
@@ -240,7 +238,6 @@ export default function ChatScreen() {
 
           {/* Message Thread */}
           <View style={styles.messageList}>
-            <Text style={{ fontSize: 10, color: 'gray', textAlign: 'center' }}>[Debug: {messages.length} messages]</Text>
             {messages.map((msg, idx) => (
               <Animated.View
                 key={msg.id}

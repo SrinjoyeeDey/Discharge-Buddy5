@@ -70,9 +70,9 @@ export default function EmergencyCardScreen() {
             </View>
             <Text style={styles.cardTitle}>Patient Information</Text>
           </View>
-          <Row label="Name" value={user?.name ?? patient?.name ?? "John Doe"} />
-          <Row label="Age" value={`${patient?.age ?? 58} years`} />
-          <Row label="Condition" value={patient?.condition ?? "Post-cardiac surgery recovery"} />
+          <Row label="Name" value={user?.name ?? patient?.name ?? "—"} />
+          <Row label="Age" value={patient?.age ? `${patient.age} years` : "—"} />
+          <Row label="Condition" value={patient?.condition ?? "—"} />
           {editing ? (
             <>
               <EditRow label="Blood Type" value={bloodType} onChange={setBloodType} />

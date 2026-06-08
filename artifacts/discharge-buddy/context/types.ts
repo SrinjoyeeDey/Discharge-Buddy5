@@ -44,4 +44,8 @@ export interface IDataProvider {
   transcribeAudio(audioBase64: string, fileExtension?: string, language?: string): Promise<string>;
   getIntent(text: string, context?: string): Promise<{ intent: string, target: string, confidence: number }>;
   sendVoiceNote(transcript: string, patientNote?: string): Promise<{ success: boolean; message: string }>;
+  scheduleVoiceReminder(data: { patientId: string; medicineName?: string; messageText: string; audioBase64?: string; scheduledTime: string }): Promise<{ success: boolean; reminder: any }>;
+  getScheduledVoiceReminders(): Promise<any[]>;
+  getDueVoiceReminders(): Promise<any[]>;
+  markVoiceReminderDelivered(id: string): Promise<void>;
 }

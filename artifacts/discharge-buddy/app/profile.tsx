@@ -146,7 +146,10 @@ export default function ProfileScreen() {
     { label: "FULL NAME", value: user?.name ?? "—" },
     { label: "EMAIL ADDRESS", value: user?.email ?? "—" },
     { label: "PHONE", value: user?.phone ?? "—" },
-    { label: "ROLE", value: role === "caregiver" ? "Caregiver" : "Patient" },
+    { label: "ROLE", value: role === "caregiver" ? "Caregiver" : role === "family" ? "Family Caregiver" : "Patient" },
+    { label: "BLOOD GROUP", value: user?.bloodType ?? "—" },
+    { label: "ALLERGIES", value: user?.allergies ?? "—" },
+    { label: "EMERGENCY CONTACT", value: user?.emergencyContactName ? `${user.emergencyContactName} (${user.emergencyContactPhone || "—"})` : "—" },
   ];
 
   return (
@@ -187,10 +190,10 @@ export default function ProfileScreen() {
 
           <View style={styles.avatarRing}>
             <View style={styles.avatarInner}>
-              {user?.avatar ? (
-                <Image source={{ uri: user.avatar }} style={styles.avatarImg} />
+              {user?.avatar || user?.profilePicture ? (
+                <Image source={{ uri: user?.avatar || user?.profilePicture }} style={styles.avatarImg} />
               ) : (
-                <Feather name={role === "caregiver" ? "users" : "user"} size={44} color={TEAL} />
+                <Feather name={role === "caregiver" ? "users" : role === "family" ? "users" : "user"} size={44} color={TEAL} />
               )}
             </View>
             <TouchableOpacity style={styles.editBadge} onPress={() => router.push("/profile/edit")}>

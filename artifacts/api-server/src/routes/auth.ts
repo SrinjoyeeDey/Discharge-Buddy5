@@ -469,6 +469,89 @@ router.post("/resend-verification", async (req, res) => {
   }
 });
 
+// Send OTP for password reset
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Email is required" });
+
+    const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
+
+    // Always return success to prevent email enumeration
+    if (!user) {
+      return res.json({ success: true, message: "If an account exists, a reset code has been sent." });
+    }
+
+    if (!user.password) {
+      return res.status(400).json({
+        error: "USE_GOOGLE_SIGNIN",
+        message: "This account uses Google Sign-In. Please sign in with Google.",
+      });
+    }
+
+    const resetCode = generateOTPCode();
+    const resetExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+
+    await db.update(users)
+      .set({
+        emailVerificationCode: resetCode,
+        emailVerificationExpires: resetExpires,
+      })
+      .where(eq(users.id, user.id));
+
+    // Reuse verification email helper for OTP delivery
+    await sendVerificationEmail(user.email, resetCode, user.name);
+
+    logger.info({ userId: user.id }, "Password reset OTP sent");
+    return res.json({ success: true, message: "If an account exists, a reset code has been sent." });
+  } catch (error) {
+    logger.error({ err: error }, "Forgot Password Error");
+    return res.status(500).json({ error: "Failed to send reset code" });
+  }
+});
+
+// Verify OTP and set new password
+router.post("/reset-password", async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ error: "Email, code and new password are required" });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    }
+
+    const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (!user.emailVerificationCode || user.emailVerificationCode !== code) {
+      return res.status(400).json({ error: "Invalid or expired reset code" });
+    }
+    if (user.emailVerificationExpires && user.emailVerificationExpires < new Date()) {
+      return res.status(400).json({ error: "Reset code has expired. Please request a new one." });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+
+    const [updatedUser] = await db.update(users)
+      .set({
+        password: hashed,
+        isEmailVerified: true,
+        emailVerificationCode: null,
+        emailVerificationExpires: null,
+      })
+      .where(eq(users.id, user.id))
+      .returning();
+
+    const token = jwt.sign({ sub: updatedUser.id }, process.env.JWT_SECRET!, { expiresIn: "7d" });
+    logger.info({ userId: user.id }, "Password reset successfully");
+    return res.json({ success: true, token, user: updatedUser });
+  } catch (error) {
+    logger.error({ err: error }, "Reset Password Error");
+    return res.status(500).json({ error: "Failed to reset password" });
+  }
+});
+
 router.get("/dev-session", async (req, res) => {
   try {
     // ONLY ALLOW IN DEV OR FOR SPECIFIC FLAG
