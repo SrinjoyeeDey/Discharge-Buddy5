@@ -10,6 +10,8 @@ export const linkStatusEnum = pgEnum("link_status", ["active", "revoked"]);
 export const bloodTypeEnum = pgEnum("blood_type", ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]);
 export const bloodUrgencyEnum = pgEnum("blood_urgency", ["low", "normal", "critical"]);
 export const bloodRequestStatusEnum = pgEnum("blood_request_status", ["open", "fulfilled", "cancelled"]);
+export const telemedicineSessionStatusEnum = pgEnum("telemedicine_session_status", ["pending", "active", "completed"]);
+export const telemedicineMessageSenderTypeEnum = pgEnum("telemedicine_message_sender_type", ["patient", "doctor", "ai"]);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -240,6 +242,27 @@ export const bloodRequests = pgTable("blood_requests", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Telemedicine Chat — patient-doctor consultations with AI pre-screening
+export const telemedicineeSessions = pgTable("telemedicine_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  patientUserId: uuid("patient_user_id").references(() => users.id).notNull(),
+  doctorId: uuid("doctor_id").references(() => users.id),
+  status: telemedicineSessionStatusEnum("status").default("pending").notNull(),
+  aiSummary: text("ai_summary"), // AI-generated symptom summary before doctor joins
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Telemedicine Chat Messages — messages in a telemedicine session
+export const telemedicineMessages = pgTable("telemedicine_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  sessionId: uuid("session_id").references(() => telemedicineeSessions.id).notNull(),
+  senderId: uuid("sender_id").references(() => users.id).notNull(),
+  senderType: telemedicineMessageSenderTypeEnum("sender_type").notNull(),
+  message: text("message").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Zod schemas for validation
 export const insertUserSchema = createInsertSchema(users);
 export const selectUserSchema = createSelectSchema(users);
@@ -257,3 +280,27 @@ export const insertFeedbackSchema = createInsertSchema(feedback);
 export const insertDischargePlanSchema = createInsertSchema(dischargePlans);
 export const insertDonorProfileSchema = createInsertSchema(donorProfiles);
 export const insertBloodRequestSchema = createInsertSchema(bloodRequests);
+export const insertTelemedicineSessionSchema = createInsertSchema(telemedicineeSessions);
+export const selectTelemedicineSessionSchema = createSelectSchema(telemedicineeSessions);
+export const insertTelemedicineMessageSchema = createInsertSchema(telemedicineMessages);
+export const selectTelemedicineMessageSchema = createSelectSchema(telemedicineMessages);
+
+// Telemedicine Chat Feature
+export const telemedicineSessions = pgTable("telemedicine_sessions", {
+  id: serial("id").primaryKey(),
+  patientUserId: integer("patient_user_id").notNull(),
+  doctorId: integer("doctor_id"),
+  status: text("status").default("pending"),
+  aiSummary: text("ai_summary"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const telemedicineMessages = pgTable("telemedicine_messages", {
+  id: serial("id").primaryKey(),
+  sessionId: integer("session_id").notNull(),
+  senderId: integer("sender_id").notNull(),
+  senderType: text("sender_type").notNull(),
+  message: text("message").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
