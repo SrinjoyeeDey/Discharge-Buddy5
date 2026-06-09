@@ -16,6 +16,7 @@ import { cacheDirectory, writeAsStringAsync, EncodingType } from "expo-file-syst
 import * as Haptics from "expo-haptics";
 import * as Speech from "expo-speech";
 import { getApiUrl } from "@/utils/apiUrl";
+import { useConnectivity } from "@/hooks/useConnectivity";
 
 export type UserRole = "patient" | "caregiver" | "family" | null;
 // Language type imported from translations.ts
@@ -217,6 +218,88 @@ export interface DrugInteraction {
   description: string;
 }
 
+export type BloodType = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-";
+
+export interface BloodDonor {
+  id: string;
+  name: string;
+  bloodType: BloodType;
+  phone: string;
+  area?: string | null;
+  city?: string | null;
+  latitude?: string | null;
+  longitude?: string | null;
+  isAvailable: boolean;
+  lastDonation?: string | null;
+  distanceKm?: number | null;
+}
+
+export interface BloodRequestItem {
+  id: string;
+  patientName: string;
+  bloodType: BloodType;
+  unitsNeeded: number;
+  hospital: string;
+  area?: string | null;
+  city?: string | null;
+  latitude?: string | null;
+  longitude?: string | null;
+  urgency: "low" | "normal" | "critical";
+  contactPhone: string;
+  note?: string | null;
+  status: "open" | "fulfilled" | "cancelled";
+  createdAt?: string;
+  distanceKm?: number | null;
+}
+
+export interface NearbyQuery {
+  lat?: number;
+  lng?: number;
+  bloodType?: BloodType;
+  radiusKm?: number;
+}
+
+export interface DonorProfileInput {
+  name: string;
+  bloodType: BloodType;
+  phone: string;
+  area?: string;
+  city?: string;
+  latitude?: number;
+  longitude?: number;
+  isAvailable?: boolean;
+  lastDonation?: string;
+}
+
+export interface BloodRequestInput {
+  patientName: string;
+  bloodType: BloodType;
+  unitsNeeded?: number;
+  hospital: string;
+  area?: string;
+  city?: string;
+  latitude?: number;
+  longitude?: number;
+  urgency?: "low" | "normal" | "critical";
+  contactPhone: string;
+  note?: string;
+}
+
+export interface DrugInteractionFinding {
+  pair: [string, string] | string[];
+  severity: "mild" | "moderate" | "high";
+  description: string;
+  advice: string;
+}
+
+export interface DrugCheckResult {
+  interactions: DrugInteractionFinding[];
+  foodWarnings: string[];
+  summary: string;
+  hasCritical: boolean;
+  medicinesChecked?: string[];
+}
+
 export interface ExtractedMedicine {
   name: string;
   dosage: string;
@@ -373,6 +456,7 @@ interface AppContextType {
   speakNeural: (text: string, targetId?: string) => Promise<void>;
   stopSpeaking: () => Promise<void>;
   isInitializing: boolean;
+  isOnline: boolean;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -382,6 +466,7 @@ const STORAGE_KEY = "discharge_buddy_data_v2";
 // Dummy items moved to DataProvider implementations
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  const isOnline = useConnectivity();
   const [user, setUserState] = useState<AppUser | null>(null);
   const [role, setRoleState] = useState<UserRole>(null);
   const [medicines, setMedicines] = useState<Medicine[]>([]);
@@ -525,12 +610,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (role === 'family') {
         try {
           const dbFamilyMembers = await dataProvider.getFamilyMembers();
-          // If API returns empty and we're in demo mode, use mock data
-          setFamilyMembers(dbFamilyMembers.length > 0 ? dbFamilyMembers : MOCK_FAMILY_MEMBERS);
+          // Only fall back to mock data in demo (MockProvider) mode, NOT for real users
+          if (dbFamilyMembers.length > 0) {
+            setFamilyMembers(dbFamilyMembers);
+          } else if (dataProvider instanceof MockProvider) {
+            setFamilyMembers(MOCK_FAMILY_MEMBERS);
+          } else {
+            // Real user with no family members yet — show empty state
+            setFamilyMembers([]);
+          }
         } catch (e) {
-          // API unavailable (404, network error, etc.) → use rich mock data for demo
-          console.warn("Family API unavailable, using mock data:", (e as any)?.message ?? e);
-          setFamilyMembers(MOCK_FAMILY_MEMBERS);
+          // API unavailable — only use mock data in demo mode
+          console.warn("Family API unavailable:", (e as any)?.message ?? e);
+          if (dataProvider instanceof MockProvider) {
+            setFamilyMembers(MOCK_FAMILY_MEMBERS);
+          } else {
+            setFamilyMembers([]);
+          }
         }
       }
 
@@ -1134,6 +1230,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         speakNeural,
         stopSpeaking,
         isInitializing,
+        isOnline,
       }}
     >
       {children}

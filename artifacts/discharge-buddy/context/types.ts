@@ -1,4 +1,4 @@
-import type { Medicine, DoseLog, SymptomLog, FollowUp, JournalEntry, Patient, PrescriptionAnalysisResult, AppUser } from "./AppContext";
+import type { Medicine, DoseLog, SymptomLog, FollowUp, JournalEntry, Patient, PrescriptionAnalysisResult, AppUser, BloodDonor, BloodRequestItem, NearbyQuery, DonorProfileInput, BloodRequestInput, DrugCheckResult } from "./AppContext";
 
 export interface IDataProvider {
   getMedicines(): Promise<Medicine[]>;
@@ -44,8 +44,21 @@ export interface IDataProvider {
   transcribeAudio(audioBase64: string, fileExtension?: string, language?: string): Promise<string>;
   getIntent(text: string, context?: string): Promise<{ intent: string, target: string, confidence: number }>;
   sendVoiceNote(transcript: string, patientNote?: string): Promise<{ success: boolean; message: string }>;
+
+  // Scheduled Voice Reminders
   scheduleVoiceReminder(data: { patientId: string; medicineName?: string; messageText: string; audioBase64?: string; scheduledTime: string }): Promise<{ success: boolean; reminder: any }>;
   getScheduledVoiceReminders(): Promise<any[]>;
   getDueVoiceReminders(): Promise<any[]>;
   markVoiceReminderDelivered(id: string): Promise<void>;
+
+  // Emergency Blood Network
+  getNearbyDonors(query: NearbyQuery): Promise<BloodDonor[]>;
+  getMyDonorProfile(): Promise<BloodDonor | null>;
+  upsertDonorProfile(data: DonorProfileInput): Promise<BloodDonor>;
+  getNearbyBloodRequests(query: NearbyQuery): Promise<BloodRequestItem[]>;
+  createBloodRequest(data: BloodRequestInput): Promise<BloodRequestItem>;
+  updateBloodRequestStatus(id: string, status: BloodRequestItem["status"]): Promise<void>;
+
+  // Drug Interaction Checker (Groq)
+  checkDrugInteractions(medicines?: string[]): Promise<DrugCheckResult>;
 }

@@ -1,7 +1,46 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { IDataProvider } from "./types";
-import type { Medicine, DoseLog, SymptomLog, FollowUp, JournalEntry, Patient, PrescriptionAnalysisResult, AppUser } from "./AppContext";
+import type { Medicine, DoseLog, SymptomLog, FollowUp, JournalEntry, Patient, PrescriptionAnalysisResult, AppUser, BloodDonor, BloodRequestItem, NearbyQuery, DonorProfileInput, BloodRequestInput, DrugCheckResult, BloodType } from "./AppContext";
 import { ALL_ACHIEVEMENTS } from "./AppContext";
+
+const DONORS_FOR_RECIPIENT: Record<BloodType, BloodType[]> = {
+  "O-": ["O-"],
+  "O+": ["O-", "O+"],
+  "A-": ["O-", "A-"],
+  "A+": ["O-", "O+", "A-", "A+"],
+  "B-": ["O-", "B-"],
+  "B+": ["O-", "O+", "B-", "B+"],
+  "AB-": ["O-", "A-", "B-", "AB-"],
+  "AB+": ["O-", "O+", "A-", "A+", "B-", "B+", "AB-", "AB+"],
+};
+
+const MOCK_DONORS: BloodDonor[] = [
+  { id: "dn1", name: "Arjun Nair", bloodType: "O-", phone: "+91 98450 11001", area: "Koramangala", city: "Bengaluru", isAvailable: true, lastDonation: "2024-02-01", distanceKm: 1.2 },
+  { id: "dn2", name: "Priya Reddy", bloodType: "O+", phone: "+91 98450 11002", area: "Indiranagar", city: "Bengaluru", isAvailable: true, lastDonation: "2024-04-10", distanceKm: 2.4 },
+  { id: "dn3", name: "Mohit Sharma", bloodType: "A+", phone: "+91 98450 11003", area: "HSR Layout", city: "Bengaluru", isAvailable: true, lastDonation: "2023-12-15", distanceKm: 3.1 },
+  { id: "dn4", name: "Fatima Khan", bloodType: "B+", phone: "+91 98450 11004", area: "Whitefield", city: "Bengaluru", isAvailable: true, lastDonation: "2024-03-05", distanceKm: 8.6 },
+  { id: "dn5", name: "Rahul Verma", bloodType: "AB+", phone: "+91 98450 11005", area: "Jayanagar", city: "Bengaluru", isAvailable: true, lastDonation: "2024-05-01", distanceKm: 4.0 },
+  { id: "dn6", name: "Vikram Singh", bloodType: "O-", phone: "+91 98450 11007", area: "Marathahalli", city: "Bengaluru", isAvailable: true, lastDonation: "2024-03-20", distanceKm: 6.3 },
+];
+
+const MOCK_REQUESTS: BloodRequestItem[] = [
+  { id: "rq1", patientName: "ICU Patient (Apollo)", bloodType: "O-", unitsNeeded: 2, hospital: "Apollo Hospital", area: "Bannerghatta Rd", city: "Bengaluru", urgency: "critical", contactPhone: "+91 98860 22001", note: "Urgent — surgery scheduled tonight.", status: "open", distanceKm: 5.5 },
+  { id: "rq2", patientName: "Ramesh K.", bloodType: "B+", unitsNeeded: 1, hospital: "Manipal Hospital", area: "Old Airport Rd", city: "Bengaluru", urgency: "normal", contactPhone: "+91 98860 22002", note: "Needed within 24 hours.", status: "open", distanceKm: 3.8 },
+  { id: "rq3", patientName: "Lakshmi S.", bloodType: "A+", unitsNeeded: 3, hospital: "Fortis Hospital", area: "Cunningham Rd", city: "Bengaluru", urgency: "critical", contactPhone: "+91 98860 22003", note: "Dengue — platelets dropping.", status: "open", distanceKm: 7.2 },
+];
+
+// Minimal offline interaction database (active-ingredient keyword matches).
+const MOCK_INTERACTION_DB: { a: string[]; b: string[]; severity: "mild" | "moderate" | "high"; description: string; advice: string }[] = [
+  { a: ["warfarin"], b: ["aspirin", "ibuprofen", "naproxen"], severity: "high", description: "Combining blood thinners with NSAIDs/aspirin raises the risk of serious bleeding.", advice: "Do not combine without medical supervision. Ask your doctor." },
+  { a: ["lisinopril", "enalapril", "ramipril"], b: ["ibuprofen", "naproxen", "diclofenac"], severity: "moderate", description: "NSAIDs can reduce the blood-pressure benefit of ACE inhibitors and affect kidney function.", advice: "Monitor blood pressure; prefer paracetamol for pain. Ask your pharmacist." },
+  { a: ["metformin"], b: ["aspirin"], severity: "mild", description: "Aspirin may slightly increase the blood-sugar-lowering effect of metformin.", advice: "Monitor blood sugar for lows." },
+  { a: ["atorvastatin", "simvastatin"], b: ["clarithromycin", "erythromycin"], severity: "high", description: "These antibiotics raise statin levels and the risk of muscle injury.", advice: "Watch for muscle pain/weakness; ask your doctor about pausing the statin." },
+  { a: ["amlodipine"], b: ["simvastatin"], severity: "moderate", description: "Amlodipine increases simvastatin levels, raising muscle side-effect risk.", advice: "Report muscle pain; doses may need adjusting by your doctor." },
+];
+
+function compatibleDonorTypes(recipient: BloodType): BloodType[] {
+  return DONORS_FOR_RECIPIENT[recipient] ?? [];
+}
 
 const STORAGE_KEY = "discharge_buddy_data_v2";
 
@@ -420,5 +459,102 @@ export class MockProvider implements IDataProvider {
 
   async markVoiceReminderDelivered(id: string): Promise<void> {
     console.log("[MockProvider] markVoiceReminderDelivered:", id);
+  }
+
+  // ─── Emergency Blood Network (offline-friendly mock) ────────────────────────
+  async getNearbyDonors(query: NearbyQuery): Promise<BloodDonor[]> {
+    let donors = MOCK_DONORS.filter(d => d.isAvailable);
+    if (query.bloodType) {
+      const allowed = new Set(compatibleDonorTypes(query.bloodType));
+      donors = donors.filter(d => allowed.has(d.bloodType));
+    }
+    return [...donors].sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
+  }
+
+  async getMyDonorProfile(): Promise<BloodDonor | null> {
+    const data = await this.getData();
+    return (data as any).myDonorProfile ?? null;
+  }
+
+  async upsertDonorProfile(input: DonorProfileInput): Promise<BloodDonor> {
+    const profile: BloodDonor = {
+      id: "my-donor",
+      name: input.name,
+      bloodType: input.bloodType,
+      phone: input.phone,
+      area: input.area ?? null,
+      city: input.city ?? null,
+      latitude: input.latitude != null ? String(input.latitude) : null,
+      longitude: input.longitude != null ? String(input.longitude) : null,
+      isAvailable: input.isAvailable ?? true,
+      lastDonation: input.lastDonation ?? null,
+      distanceKm: 0,
+    };
+    await this.saveData({ myDonorProfile: profile } as any);
+    return profile;
+  }
+
+  async getNearbyBloodRequests(_query: NearbyQuery): Promise<BloodRequestItem[]> {
+    const data = await this.getData();
+    const local: BloodRequestItem[] = (data as any).myBloodRequests ?? [];
+    const all = [...local.filter(r => r.status === "open"), ...MOCK_REQUESTS];
+    const rank = { critical: 0, normal: 1, low: 2 } as const;
+    return all.sort((a, b) => rank[a.urgency] - rank[b.urgency] || (a.distanceKm ?? 999) - (b.distanceKm ?? 999));
+  }
+
+  async createBloodRequest(input: BloodRequestInput): Promise<BloodRequestItem> {
+    const req: BloodRequestItem = {
+      id: `rq_${Date.now()}`,
+      patientName: input.patientName,
+      bloodType: input.bloodType,
+      unitsNeeded: input.unitsNeeded ?? 1,
+      hospital: input.hospital,
+      area: input.area ?? null,
+      city: input.city ?? null,
+      latitude: input.latitude != null ? String(input.latitude) : null,
+      longitude: input.longitude != null ? String(input.longitude) : null,
+      urgency: input.urgency ?? "normal",
+      contactPhone: input.contactPhone,
+      note: input.note ?? null,
+      status: "open",
+      createdAt: new Date().toISOString(),
+      distanceKm: 0,
+    };
+    const data = await this.getData();
+    const existing: BloodRequestItem[] = (data as any).myBloodRequests ?? [];
+    await this.saveData({ myBloodRequests: [req, ...existing] } as any);
+    return req;
+  }
+
+  async updateBloodRequestStatus(id: string, status: BloodRequestItem["status"]): Promise<void> {
+    const data = await this.getData();
+    const existing: BloodRequestItem[] = (data as any).myBloodRequests ?? [];
+    await this.saveData({ myBloodRequests: existing.map(r => r.id === id ? { ...r, status } : r) } as any);
+  }
+
+  // ─── Drug Interaction Checker (offline keyword-based fallback) ───────────────
+  async checkDrugInteractions(medicines?: string[]): Promise<DrugCheckResult> {
+    const meds = (medicines ?? []).map(m => m.toLowerCase().trim()).filter(Boolean);
+    if (meds.length < 2) {
+      return { interactions: [], foodWarnings: [], summary: "Add at least two medicines to check for interactions.", hasCritical: false, medicinesChecked: medicines ?? [] };
+    }
+    const findings: DrugCheckResult["interactions"] = [];
+    const hit = (list: string[]) => list.find(k => meds.some(m => m.includes(k)));
+    for (const rule of MOCK_INTERACTION_DB) {
+      const a = hit(rule.a);
+      const b = hit(rule.b);
+      if (a && b && a !== b) {
+        findings.push({ pair: [a, b], severity: rule.severity, description: rule.description, advice: rule.advice });
+      }
+    }
+    return {
+      interactions: findings,
+      foodWarnings: [],
+      summary: findings.length
+        ? `${findings.length} potential interaction(s) found in your medicine list (offline check).`
+        : "No known interactions found in the offline database. Reconnect for a full AI check.",
+      hasCritical: findings.some(f => f.severity === "high"),
+      medicinesChecked: medicines ?? [],
+    };
   }
 }

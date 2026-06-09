@@ -17,6 +17,7 @@ import aiRouter from "./ai";
 import familyRouter from "./family";
 import linksRouter from "./links";
 import voiceNotesRouter from "./voiceNotes";
+import bloodNetworkRouter from "./bloodNetwork";
 
 const router: IRouter = Router();
 
@@ -41,5 +42,6 @@ router.use("/ai", aiRouter);
 router.use("/family", familyRouter);
 router.use("/links", linksRouter);
 router.use("/voice-notes", voiceNotesRouter);
+router.use("/blood", bloodNetworkRouter);
 
 export default router;

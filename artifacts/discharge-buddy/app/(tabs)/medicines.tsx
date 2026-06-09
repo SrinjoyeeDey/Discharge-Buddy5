@@ -241,6 +241,12 @@ export default function MedicinesScreen() {
           </View>
           <View style={{ flexDirection: "row", gap: 12 }}>
             <AnimPressable
+              onPress={() => router.push("/drug-checker" as any)}
+              style={styles.scanBtn}
+            >
+              <Feather name="shield" size={20} color={PURPLE} />
+            </AnimPressable>
+            <AnimPressable
               onPress={() => router.push("/scan")}
               style={styles.scanBtn}
             >

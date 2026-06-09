@@ -934,6 +934,12 @@ const styles = StyleSheet.create({
 
   // Alerts
   alertsContainer: { gap: 12 },
+  emptyAlerts: {
+    alignItems: 'center', justifyContent: 'center', gap: 10,
+    paddingVertical: 28, backgroundColor: CARD_BG, borderRadius: 20,
+    borderWidth: 1, borderColor: '#F1F5F9',
+  },
+  emptyAlertsText: { fontSize: 13, color: TEXT_MUTED, fontFamily: 'Inter_500Medium', textAlign: 'center', maxWidth: '80%' },
   alertCard: {
      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
      backgroundColor: CARD_BG, padding: 16, borderRadius: 20,

@@ -495,6 +495,14 @@ function PatientDashboard({ topInset }: { topInset: number }) {
             <QuickAction icon="alert-triangle" label="Emergency" color="#F59E0B" delay={200}
               onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); Linking.openURL("tel:112"); }} />
           </View>
+          <View style={[styles.quickRow, { marginTop: 18 }]}>
+            <QuickAction icon="droplet" label="Blood Network" color="#E11D48" delay={240}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push("/blood-network" as any); }} />
+            <QuickAction icon="shield" label="Drug Check" color="#6C47FF" delay={280}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push("/drug-checker" as any); }} />
+            <QuickAction icon="phone-call" label="Emergency" color="#EF4444" delay={320}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push("/emergency" as any); }} />
+          </View>
         </View>
 
         {upcomingFollowUp && (

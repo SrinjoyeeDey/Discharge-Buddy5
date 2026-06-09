@@ -1,6 +1,16 @@
 import { customFetch } from "@workspace/api-client-react";
 import type { IDataProvider } from "./types";
-import type { Medicine, DoseLog, SymptomLog, FollowUp, JournalEntry, Patient, PrescriptionAnalysisResult, AppUser } from "./AppContext";
+import type { Medicine, DoseLog, SymptomLog, FollowUp, JournalEntry, Patient, PrescriptionAnalysisResult, AppUser, BloodDonor, BloodRequestItem, NearbyQuery, DonorProfileInput, BloodRequestInput, DrugCheckResult } from "./AppContext";
+
+function nearbyQueryString(q: NearbyQuery): string {
+  const params = new URLSearchParams();
+  if (q.lat != null) params.set("lat", String(q.lat));
+  if (q.lng != null) params.set("lng", String(q.lng));
+  if (q.bloodType) params.set("bloodType", q.bloodType);
+  if (q.radiusKm != null) params.set("radiusKm", String(q.radiusKm));
+  const s = params.toString();
+  return s ? `?${s}` : "";
+}
 
 export class ApiProvider implements IDataProvider {
   async getMedicines(): Promise<Medicine[]> {
@@ -289,6 +299,53 @@ export class ApiProvider implements IDataProvider {
   async markVoiceReminderDelivered(id: string): Promise<void> {
     await customFetch(`/api/voice-notes/reminders/${id}/delivered`, {
       method: "PUT",
+    });
+  }
+
+  // ─── Emergency Blood Network ────────────────────────────────────────────────
+  async getNearbyDonors(query: NearbyQuery): Promise<BloodDonor[]> {
+    const res = await customFetch<{ donors: BloodDonor[] }>(`/api/blood/donors/nearby${nearbyQueryString(query)}`);
+    return res.donors ?? [];
+  }
+
+  async getMyDonorProfile(): Promise<BloodDonor | null> {
+    const res = await customFetch<{ profile: BloodDonor | null }>("/api/blood/donors/me");
+    return res.profile ?? null;
+  }
+
+  async upsertDonorProfile(data: DonorProfileInput): Promise<BloodDonor> {
+    const res = await customFetch<{ profile: BloodDonor }>("/api/blood/donors", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return res.profile;
+  }
+
+  async getNearbyBloodRequests(query: NearbyQuery): Promise<BloodRequestItem[]> {
+    const res = await customFetch<{ requests: BloodRequestItem[] }>(`/api/blood/requests/nearby${nearbyQueryString(query)}`);
+    return res.requests ?? [];
+  }
+
+  async createBloodRequest(data: BloodRequestInput): Promise<BloodRequestItem> {
+    const res = await customFetch<{ request: BloodRequestItem }>("/api/blood/requests", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return res.request;
+  }
+
+  async updateBloodRequestStatus(id: string, status: BloodRequestItem["status"]): Promise<void> {
+    await customFetch(`/api/blood/requests/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  // ─── Drug Interaction Checker (Groq) ────────────────────────────────────────
+  async checkDrugInteractions(medicines?: string[]): Promise<DrugCheckResult> {
+    return await customFetch<DrugCheckResult>("/api/ai/drug-check", {
+      method: "POST",
+      body: JSON.stringify({ medicines: medicines ?? [] }),
     });
   }
 

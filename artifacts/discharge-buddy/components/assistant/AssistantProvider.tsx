@@ -5,6 +5,7 @@ import { useAssistantEvents } from '@/hooks/assistant/useAssistantEvents';
 import { useApp, type SymptomLog } from '@/context/AppContext';
 import { router } from 'expo-router';
 import * as Speech from 'expo-speech';
+import * as Notifications from 'expo-notifications';
 import { LOCALE_BY_LANG, type Language } from '@/constants/translations';
 import { loadHistory, appendTurns, recentForPrompt } from '@/utils/conversationMemory';
 import { describeScreen } from '@/utils/contextEngine';
@@ -63,9 +64,40 @@ const NAV_ROUTES: Record<string, { path: string; label: string }> = {
   notifications: { path: '/notifications', label: 'your notifications' },
   emergency: { path: '/emergency', label: 'the emergency screen' },
   family: { path: '/family/dashboard', label: 'the family dashboard' },
+  meditation: { path: '/meditation', label: 'the meditation timer' },
 };
 
 // LOCALE_BY_LANG is the shared source of truth (constants/translations.ts).
+
+// Voice Emergency Mode — deterministic safety net.
+// These phrases trigger the SOS flow immediately, without waiting on the AI
+// intent classifier, so the feature stays fast and works even offline. Covers
+// bare distress words and the critical danger signs from the emergency screen,
+// in the app's supported languages.
+const EMERGENCY_PHRASES: string[] = [
+  // English — distress words
+  "help me", "help help", "emergency", "sos", "save me", "i need help", "call for help",
+  "call ambulance", "call an ambulance", "i'm dying", "im dying",
+  // English — critical danger signs
+  "chest pain", "chest pressure", "can't breathe", "cant breathe", "cannot breathe",
+  "difficulty breathing", "trouble breathing", "short of breath",
+  "heart attack", "stroke", "slurred speech", "face drooping", "severe bleeding",
+  "i collapsed", "i'm choking", "im choking", "unconscious",
+  // Hindi
+  "bachao", "madad", "मदद", "बचाओ", "सीने में दर्द", "साँस नहीं", "दिल का दौरा",
+  // Spanish
+  "ayuda", "emergencia", "dolor de pecho", "no puedo respirar",
+  // Urdu / Bengali
+  "مدد", "بچاؤ", "বাঁচাও", "সাহায্য", "বুকে ব্যথা",
+];
+
+function isEmergencyUtterance(text: string): boolean {
+  const t = text.toLowerCase().trim();
+  if (!t) return false;
+  // A lone "help" or "emergency" is unambiguous enough to act on.
+  if (t === "help" || t === "emergency" || t === "sos") return true;
+  return EMERGENCY_PHRASES.some((p) => t.includes(p));
+}
 
 const LANG_SWITCH_REPLY: Partial<Record<Language, string>> = {
   en: 'Okay, switching to English.',
@@ -187,6 +219,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const continueConversationRef = useRef(false);
   const startAssistantRef = useRef<() => Promise<void>>(async () => {});
   const pendingSymptomLogRef = useRef<{ symptom: string; lang: string } | null>(null);
+  const pendingMeditationRef = useRef<boolean>(false);
 
   // ── Speak a phrase and resolve when playback finishes. ──
   const speak = useCallback(
@@ -249,7 +282,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
   // ── Handlers for ACTION-type intents (things that DO something). ──
   const handleAction = useCallback(
-    async (target: string, currentTranscript: string): Promise<void> => {
+    async (target: string, currentTranscript: string, metadata?: any): Promise<void> => {
       let reply = '';
 
       switch (target) {
@@ -299,36 +332,77 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         }
         case 'LOG_SYMPTOM': {
           const activeLang = isBengaliText(currentTranscript) ? 'bn' : (isHindiText(currentTranscript) ? 'hi' : language);
-          const symptomKey = extractSymptom(currentTranscript, activeLang);
-          
-          pendingSymptomLogRef.current = {
-            symptom: symptomKey,
-            lang: activeLang
-          };
+          const symptomKey = metadata?.symptom || extractSymptom(currentTranscript, activeLang);
+          const severity = metadata?.severity;
           
           const localizedDict = SYMPTOM_LOCALIZATION[activeLang] || SYMPTOM_LOCALIZATION['en'];
           const localizedSymptom = localizedDict[symptomKey] || symptomKey;
           
-          let reply = '';
-          if (activeLang === 'bn') {
-            reply = `আপনার ${localizedSymptom} এর তীব্রতা ১ থেকে ৫ এর মধ্যে কত? ৫ হচ্ছে সবচেয়ে বেশি।`;
-          } else if (activeLang === 'hi') {
-            reply = `आपके ${localizedSymptom} की तीव्रता 1 से 5 के बीच कितनी है? 5 सबसे अधिक है।`;
-          } else {
-            reply = `How would you rate the severity of your ${localizedSymptom} from 1 to 5, with 5 being the most severe?`;
-          }
-          
-          router.push('/(tabs)/symptoms' as any);
-          
-          setLastReply(reply);
-          setState('speaking');
-          await speak(reply, LOCALE_BY_LANG[activeLang]);
-          
-          setTimeout(() => {
-            if (continueConversationRef.current) {
-              startAssistantRef.current();
+          if (severity != null) {
+            // Implicit logging: map 1-10 to 1-5
+            const mappedSeverity = Math.min(5, Math.max(1, Math.ceil(severity / 2)));
+            
+            try {
+              await api.addSymptomLog({
+                id: Math.random().toString(),
+                symptoms: [symptomKey],
+                severity: mappedSeverity,
+                notes: `Logged via Voice Assistant. Severity: ${severity}/10.`,
+                date: new Date().toISOString().split('T')[0],
+                riskLevel: mappedSeverity >= 4 ? 'high' : (mappedSeverity === 3 ? 'medium' : 'low')
+              });
+              
+              if (activeLang === 'bn') {
+                reply = `আমি মাঝারি তীব্রতার সাথে আপনার ${localizedSymptom} যোগ করেছি।`;
+              } else if (activeLang === 'hi') {
+                reply = `मैंने ${severity} की तीव्रता के साथ आपके ${localizedSymptom} को दर्ज कर लिया है।`;
+              } else {
+                reply = `I've logged your ${localizedSymptom} with severity ${severity}.`;
+              }
+              setLastReply(reply);
+              setState('speaking');
+              await speak(reply, LOCALE_BY_LANG[activeLang]);
+              
+              if (continueConversationRef.current) {
+                setTimeout(() => {
+                  if (continueConversationRef.current) startAssistantRef.current();
+                }, 500);
+              } else {
+                finish();
+              }
+            } catch (err) {
+              reply = `I'm sorry, I couldn't log your symptom right now.`;
+              setLastReply(reply);
+              setState('speaking');
+              await speak(reply, LOCALE_BY_LANG[activeLang]);
+              finish();
             }
-          }, 500);
+          } else {
+            // Explicit logging (needs severity)
+            pendingSymptomLogRef.current = {
+              symptom: symptomKey,
+              lang: activeLang
+            };
+            
+            if (activeLang === 'bn') {
+              reply = `আপনার ${localizedSymptom} এর তীব্রতা ১ থেকে ১০ এর মধ্যে কত?`;
+            } else if (activeLang === 'hi') {
+              reply = `आपके ${localizedSymptom} की तीव्रता 1 से 10 के बीच कितनी है?`;
+            } else {
+              reply = `How severe would you say your ${localizedSymptom} is from 1 to 10?`;
+            }
+            
+            // Do NOT navigate to symptoms
+            setLastReply(reply);
+            setState('speaking');
+            await speak(reply, LOCALE_BY_LANG[activeLang]);
+            
+            setTimeout(() => {
+              if (continueConversationRef.current) {
+                startAssistantRef.current();
+              }
+            }, 500);
+          }
           return;
         }
         case 'ADD_MEDICINE': {
@@ -403,6 +477,47 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
           finish();
           return;
         }
+        case 'SET_TIMER': {
+          const isMeditation = metadata?.isMeditation;
+          const mins = metadata?.timerMinutes;
+          if (isMeditation && !mins) {
+            // No duration provided – ask the user for duration
+            pendingMeditationRef.current = true;
+            reply = "How long would you like to meditate?";
+            setLastReply(reply);
+            setState('speaking');
+            await speak(reply);
+            // Do not finish; wait for user response
+            return;
+          }
+          if (isMeditation) {
+            reply = `Opening the meditation timer for ${mins} minutes.`;
+            setLastReply(reply);
+            setState('speaking');
+            router.push(`/meditation?duration=${mins}` as any);
+            await speak(reply);
+            finish();
+          } else {
+            reply = `Done. I'll remind you in ${mins} minutes.`;
+            setLastReply(reply);
+            setState('speaking');
+            try {
+              await Notifications.scheduleNotificationAsync({
+                content: {
+                  title: 'Reminder 🔔',
+                  body: currentTranscript,
+                  sound: true,
+                },
+                trigger: { seconds: mins * 60, type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL },
+              });
+            } catch (err) {
+              console.warn('[Assistant] Failed to schedule notification', err);
+            }
+            await speak(reply);
+            finish();
+          }
+          return;
+        }
         default: {
           // Unrecognised action → treat as a conversation so the user still gets a reply.
           await handleChatRef.current(currentTranscript || '');
@@ -464,7 +579,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     const cleanText = transcript.toLowerCase().trim();
     let severity = 0;
     
-    const digitMatch = cleanText.match(/[1-5]/);
+    const digitMatch = cleanText.match(/(10|[1-9])/);
     if (digitMatch) {
       severity = parseInt(digitMatch[0], 10);
     } else {
@@ -473,16 +588,22 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       else if (cleanText.includes('three') || cleanText.includes('tin') || cleanText.includes('teen') || cleanText.includes('তিন')) severity = 3;
       else if (cleanText.includes('four') || cleanText.includes('char') || cleanText.includes('chaar') || cleanText.includes('চার')) severity = 4;
       else if (cleanText.includes('five') || cleanText.includes('paanch') || cleanText.includes('pac') || cleanText.includes('পাঁচ')) severity = 5;
+      else if (cleanText.includes('six') || cleanText.includes('chhoy') || cleanText.includes('chhah') || cleanText.includes('ছয়')) severity = 6;
+      else if (cleanText.includes('seven') || cleanText.includes('saat') || cleanText.includes('সাত')) severity = 7;
+      else if (cleanText.includes('eight') || cleanText.includes('aat') || cleanText.includes('aath') || cleanText.includes('আট')) severity = 8;
+      else if (cleanText.includes('nine') || cleanText.includes('noy') || cleanText.includes('nau') || cleanText.includes('নয়')) severity = 9;
+      else if (cleanText.includes('ten') || cleanText.includes('dosh') || cleanText.includes('das') || cleanText.includes('দশ')) severity = 10;
     }
     
-    if (severity >= 1 && severity <= 5) {
+    if (severity >= 1 && severity <= 10) {
+      const mappedSeverity = Math.min(5, Math.max(1, Math.ceil(severity / 2)));
       const newLog: SymptomLog = {
         id: Math.random().toString(),
         date: new Date().toISOString().split('T')[0],
         symptoms: [symptom],
-        severity: severity,
-        notes: `Logged via Voice Assistant in ${lang === 'bn' ? 'Bengali' : (lang === 'hi' ? 'Hindi' : 'English')}.`,
-        riskLevel: severity >= 4 ? 'high' : (severity === 3 ? 'medium' : 'low'),
+        severity: mappedSeverity,
+        notes: `Logged via Voice Assistant in ${lang === 'bn' ? 'Bengali' : (lang === 'hi' ? 'Hindi' : 'English')}. Severity: ${severity}/10.`,
+        riskLevel: mappedSeverity >= 4 ? 'high' : (mappedSeverity === 3 ? 'medium' : 'low'),
       };
       
       try {
@@ -498,11 +619,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       
       let reply = '';
       if (lang === 'bn') {
-        reply = `তীব্রতা ${severity} এর সাথে আপনার ${localizedSymptom} যোগ করা হয়েছে। আপনার পরিবারের সদস্যদের সতর্ক করা হয়েছে।`;
+        reply = `তীব্রতা ${severity} এর সাথে আপনার ${localizedSymptom} যোগ করা হয়েছে।`;
       } else if (lang === 'hi') {
-        reply = `Severity ${severity} के साथ आपका ${localizedSymptom} दर्ज कर लिया गया है। आपके परिवार को सूचित कर दिया गया है।`;
+        reply = `मैंने ${severity} की तीव्रता के साथ आपके ${localizedSymptom} को दर्ज कर लिया है।`;
       } else {
-        reply = `Logged ${localizedSymptom} with a severity rating of ${severity}. Caregiver and family alerts have been updated.`;
+        reply = `Logged ${localizedSymptom} with a severity of ${severity}.`;
       }
       
       setLastReply(reply);
@@ -521,11 +642,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     } else {
       let reply = '';
       if (lang === 'bn') {
-        reply = 'দয়া করে আপনার উপসর্গের তীব্রতা ১ থেকে ৫ এর মধ্যে কত বলুন। ৫ হচ্ছে সবচেয়ে বেশি তীব্র।';
+        reply = 'দয়া করে আপনার উপসর্গের তীব্রতা ১ থেকে ১০ এর মধ্যে কত বলুন। ১০ হচ্ছে সবচেয়ে বেশি তীব্র।';
       } else if (lang === 'hi') {
-        reply = 'कृपया अपने लक्षण की तीव्रता 1 से 5 के बीच बताएं, जहां 5 सबसे अधिक है।';
+        reply = 'कृपया अपने लक्षण की तीव्रता 1 से 10 के बीच बताएं, जहां 10 सबसे अधिक है।';
       } else {
-        reply = "Please tell me a severity rating from 1 to 5, with 5 being the most severe.";
+        reply = "Please tell me a severity from 1 to 10, with 10 being the most severe.";
       }
       
       setLastReply(reply);
@@ -563,15 +684,40 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       const transcript = text.trim();
       setLastTranscript(transcript);
       events.publish('TRANSCRIPTION_SUCCESS', { text: transcript, context: activeModule });
-      
+
+      // Voice Emergency Mode: distress phrases bypass the AI classifier and go
+      // straight to the SOS flow — fast, and works even with no connection.
+      if (isEmergencyUtterance(transcript)) {
+        pendingSymptomLogRef.current = null;
+        pendingMeditationRef.current = false;
+        await handleAction('TRIGGER_EMERGENCY', transcript);
+        return;
+      }
+
       if (pendingSymptomLogRef.current) {
         await handleSymptomSeverityRating(transcript);
         return;
       }
       
+      if (pendingMeditationRef.current) {
+        const match = transcript.match(/(\d+)/);
+        const minutes = match ? parseInt(match[1], 10) : null;
+        if (minutes) {
+          pendingMeditationRef.current = false;
+          await handleAction('SET_TIMER', transcript, { isMeditation: true, timerMinutes: minutes });
+          return;
+        } else {
+          let reply = "Please tell me the duration in minutes for your meditation.";
+          setLastReply(reply);
+          setState('speaking');
+          await speak(reply);
+          return;
+        }
+      }
+      
       setState('processing');
 
-      let result: { intent: string; target: string; confidence: number };
+      let result: { intent: string; target: string; metadata?: any; confidence: number };
       try {
         result = await api.getIntent(transcript, activeModule || 'unknown');
       } catch (err) {
@@ -594,7 +740,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (intent === 'ACTION' && target) {
-        await handleAction(target, transcript);
+        await handleAction(target, transcript, result.metadata);
         return;
       }
 

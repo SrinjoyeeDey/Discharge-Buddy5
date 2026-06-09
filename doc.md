@@ -527,3 +527,100 @@ EXPO_PUBLIC_DOMAIN="localhost:8081" pnpm run build
 - `discharge-buddy/context/{types.ts,ApiProvider.ts,MockProvider.ts}` — `transcribeAudio(audioBase64, fileExtension?, language?)`.
 
 
+## SECTION 10 — Care Network, Drug Safety & Resilience Features
+
+This iteration adds four user-facing features. All follow the existing
+`IDataProvider` → `ApiProvider` (live) / `MockProvider` (offline + guest)
+pattern, and screens reuse the gradient-header layout.
+
+### 1. Emergency Blood Network (location-based community)
+A real, DB-backed donor community with blood requests broadcast to nearby people.
+
+- **DB** (`lib/db/src/schema/index.ts`): `donor_profiles` and `blood_requests`
+  tables with `blood_type` / `blood_urgency` / `blood_request_status` enums and
+  `latitude`/`longitude`. Applied with the idempotent raw-SQL script
+  `artifacts/api-server/apply-blood-schema.mjs` (drizzle-kit push needs a TTY,
+  so it can't run in CI/non-interactive shells).
+- **API** (`artifacts/api-server/src/routes/bloodNetwork.ts`, mounted `/api/blood`):
+  - `POST /donors` join/update my donor profile · `GET /donors/me`
+  - `GET /donors/nearby?lat&lng&bloodType&radiusKm` — only **compatible** donor
+    types (matrix in `src/lib/bloodCompat.ts`), Haversine-sorted by distance.
+  - `POST /requests` · `GET /requests/nearby` (critical-first, then nearest) ·
+    `PATCH /requests/:id` (requester sets fulfilled/cancelled).
+- **Seed**: `artifacts/api-server/seed-blood-community.mjs` populates 12 donors +
+  3 open requests so "nearby" is non-empty out of the box.
+- **Screen** `app/blood-network.tsx`: Requests / Donors / My Profile tabs,
+  `expo-location` for real distances, one-tap call, availability toggle.
+- **Entry points**: home quick-action, sidebar, emergency screen card.
+
+### 2. Drug Interaction Checker (Groq)
+- **API** `POST /api/ai/drug-check`: Groq `llama-3.3-70b-versatile`, strict
+  medical-safety JSON prompt → `{ interactions[{pair,severity,description,advice}],
+  foodWarnings, summary, hasCritical }`. Falls back to the linked patient's
+  active medicines when none supplied. Never diagnoses or changes doses.
+- **Screen** `app/drug-checker.tsx`: auto-loads current meds, add/remove ad-hoc
+  drugs, severity-coded cards (mild/moderate/high), disclaimer.
+- **Entry points**: medicines-screen header (shield), home quick-action, sidebar.
+
+### 3. Offline Emergency Mode (poor network / rural)
+- `hooks/useConnectivity.ts` — zero-dependency online/offline detection
+  (`navigator.onLine` + window events on web; `/api/healthz` ping with timeout
+  on native). Exposed as `isOnline` on `AppContext`.
+- `components/OfflineBanner.tsx` — global banner mounted in `app/_layout.tsx`.
+- `utils/offlineCache.ts` — JSON-on-AsyncStorage cache. Blood Network and Drug
+  Checker cache last results and fall back to cached / on-device data when
+  offline; the emergency screen is already fully local (contacts, danger signs,
+  `tel:` dialing).
+
+### 4. Voice Emergency Mode (accessibility — the headline of this iteration)
+Saying **"Help"**, **"Emergency"**, **"Chest pain"**, **"I can't breathe"** (and
+other distress words / critical danger signs, in English/Hindi/Spanish/Urdu/
+Bengali) instantly **opens emergency mode and runs the SOS flow**.
+
+Flow: voice transcript → `handleTranscript` (`AssistantProvider.tsx`) →
+`TRIGGER_EMERGENCY` action → `triggerEmergency()` (alerts caregiver) +
+`router.push('/emergency')` + spoken *"Hang on — I'm getting help for you right now."*
+
+Because this is safety-critical, detection is **deterministic and layered**, not
+solely LLM-dependent:
+- **Client guard** (`isEmergencyUtterance`, `AssistantProvider.tsx`): the raw
+  transcript is checked against an emergency phrase list **before** the intent
+  API call — so it fires instantly and **works even with no connection**.
+- **Server guard** (`isEmergencyIntent`, `routes/ai.ts`): `POST /api/ai/intent`
+  short-circuits the same phrases to `TRIGGER_EMERGENCY` (confidence 0.99)
+  before calling the model — protecting the typed/chat path and saving latency
+  (the small `llama-3.1-8b-instant` router was unreliable on these phrases).
+- **Prompt** also updated so paraphrases the keyword lists miss still classify
+  as `TRIGGER_EMERGENCY`, with critical danger signs overriding `LOG_SYMPTOM`.
+
+### Verification (this iteration)
+- ✅ Workspace `pnpm run typecheck` clean (libs, `api-server`, `discharge-buddy`).
+- ✅ `api-server` esbuild bundle clean.
+- ✅ DB schema applied + community seeded (12 donors, 3 requests).
+- ✅ Live API: `/api/blood/donors/nearby` returns 12; `?bloodType=A+` correctly
+  returns only A+/A-/O+/O- donors; `/api/blood/requests/nearby` critical-first;
+  `/api/ai/drug-check` returns structured interactions.
+- ✅ `/api/ai/intent`: "Help" / "Emergency" / "I have chest pain" / "I can't
+  breathe" → `TRIGGER_EMERGENCY` (0.99); normal commands still classify
+  ("show my progress" → NAVIGATE progress).
+
+### Files changed in this iteration
+- `lib/db/src/schema/index.ts` — blood-network enums, `donor_profiles`,
+  `blood_requests` + insert schemas.
+- `api-server/src/lib/bloodCompat.ts` — **new** (compatibility matrix + Haversine).
+- `api-server/src/routes/bloodNetwork.ts` — **new** (`/api/blood`); registered in
+  `routes/index.ts`.
+- `api-server/src/routes/ai.ts` — **added** `POST /api/ai/drug-check`; **added**
+  deterministic emergency guard + emergency vocabulary to `POST /api/ai/intent`.
+- `api-server/apply-blood-schema.mjs`, `seed-blood-community.mjs` — **new** DB scripts.
+- `discharge-buddy/app/blood-network.tsx`, `app/drug-checker.tsx` — **new** screens
+  (registered in `app/_layout.tsx`).
+- `discharge-buddy/components/OfflineBanner.tsx`, `hooks/useConnectivity.ts`,
+  `utils/offlineCache.ts` — **new** offline support.
+- `discharge-buddy/components/assistant/AssistantProvider.tsx` — Voice Emergency
+  Mode client guard.
+- `discharge-buddy/context/{types.ts,AppContext.tsx,ApiProvider.ts,MockProvider.ts}` —
+  blood/drug provider methods, new types, `isOnline`.
+- `discharge-buddy/app/(tabs)/index.tsx`, `app/(tabs)/medicines.tsx`,
+  `app/emergency.tsx`, `components/Sidebar.tsx` — entry points.
+

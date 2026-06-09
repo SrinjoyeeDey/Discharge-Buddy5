@@ -74,6 +74,22 @@ export default function EmergencyScreen() {
           </View>
         </View>
 
+        <AnimPressable
+          onPress={() => router.push("/blood-network" as any)}
+          style={[styles.bloodCard, { backgroundColor: "#E11D4810", borderColor: "#E11D4840" }]}
+        >
+          <View style={[styles.contactIcon, { backgroundColor: "#E11D4815" }]}>
+            <Feather name="droplet" size={18} color="#E11D48" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.cardTitle, { color: "#E11D48", fontSize: 16 }]}>Find Blood Donors</Text>
+            <Text style={[styles.cardSubtitle, { color: MUTED, fontSize: 13, textAlign: "left" }]}>
+              Reach nearby donors or post an urgent blood request
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={20} color="#E11D48" />
+        </AnimPressable>
+
         <View style={[styles.contactCard, { backgroundColor: CARD_BG, borderColor: BORDER }]}>
           <Text style={[styles.contactTitle, { color: FOREGROUND }]}>Emergency Contacts</Text>
           {[
@@ -174,6 +190,15 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 22, fontFamily: "Inter_700Bold" },
   cardSubtitle: { fontSize: 15, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 22 },
   btnWrapper: { marginTop: 10 },
+  bloodCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    marginBottom: 16,
+  },
   contactCard: {
     padding: 20,
     borderRadius: 20,

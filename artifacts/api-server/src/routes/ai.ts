@@ -19,11 +19,15 @@ RULES:
 3. BE PROFESSIONAL: Do NOT use any emojis. Maintain a polite, classy, and composed tone.
 4. BE CONCISE: Keep responses extremely short—no more than 2-3 brief sentences.
 5. ACTION ORIENTED: Always suggest 1-2 relevant next steps in the app (e.g. logging a symptom).
+6. SEVERITY: Always use the word "severity" instead of "rating".
+7. CONVERSATION MEMORY: If the user refers to an ongoing symptom (e.g. "I still have the headache"), reference recent logs naturally.
+8. MEDICATION DOSE NOTIFICATIONS: Do NOT mention pending doses unless the user explicitly asks about medication or medication adherence is highly relevant to their query. Even if a dose is overdue, do NOT bring it up unsolicited. Do NOT reference specific medicine names proactively.
+9. NAVIGATION: Prioritize confirming actions immediately. Avoid forcing users through UI flows unnecessarily.
 
 STRICT SAFETY:
 - No medical diagnoses.
 - No changes to medicine dosage.
-- If symptoms are severe (risk > 80), tell them to call a doctor IMMEDIATELY.
+- If symptoms are severe (risk > 80), advise them to seek medical attention immediately, but do NOT mention their pending medications or doses unless they explicitly asked.
 
 OUTPUT FORMAT:
 - You must respond in a valid JSON format.
@@ -31,10 +35,13 @@ OUTPUT FORMAT:
 - Valid Action Types: TAKE_MEDICINE, LOG_SYMPTOM, NAVIGATE_TO_MEDICINES
 
 Example of a GOOD response:
-"I am sorry to hear you are experiencing soreness. This is common after your procedure. Would you like me to help you log your pain levels?"
+"I have logged dizziness with mild severity. Since you also missed your morning medication, I recommend taking it now." (Only if dose is missed)
+"I've logged your headache with moderate severity." (If just logging a symptom)
 
 Example of a BAD response (DO NOT USE):
-"I'm your recovery assistant! How are you feeling today? 💜"
+"Please provide rating." (Use severity)
+"You also have pending medicines." (If not relevant/overdue)
+"I'm your recovery assistant! How are you feeling today? 💜" (Too informal, emojis)
 `;
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
@@ -110,9 +117,9 @@ router.post("/tts", async (req: any, res: any) => {
       stack: error.stack,
       voiceId: VOICE_ID
     });
-    return res.status(500).json({ 
+    return res.status(500).json({
       error: "Failed to generate voice.",
-      details: error.message 
+      details: error.message
     });
   }
 });
@@ -331,6 +338,106 @@ router.post("/chat", optionalAuth, async (req: any, res: any) => {
 });
 
 /**
+ * @route POST /api/ai/drug-check
+ * @desc Check a set of medicines for drug-drug interactions using Groq.
+ *       Accepts an explicit { medicines: string[] } list, otherwise falls back
+ *       to the authenticated patient's active medicines.
+ */
+const DRUG_CHECK_SYSTEM_PROMPT = `
+You are a clinical pharmacology assistant that screens a patient's medication list for drug-drug interactions.
+
+RULES:
+1. Only report interactions between drugs that are ACTUALLY present in the provided list. Never invent a medicine that is not listed.
+2. Match by active ingredient. "Tylenol" = acetaminophen/paracetamol, "Advil" = ibuprofen, etc.
+3. severity must be one of: "mild", "moderate", "high".
+   - "high" = potentially dangerous, needs prompt medical attention / avoid combination.
+   - "moderate" = clinically significant, monitor closely.
+   - "mild" = minor, usually manageable.
+4. Be factual and concise. Use plain language a patient can understand. No emojis.
+5. NEVER give a diagnosis or tell the patient to start/stop/change a dose. Advice = "monitor for X", "space doses", "ask your doctor or pharmacist".
+6. If there are no known interactions, return an empty "interactions" array and an encouraging summary.
+
+OUTPUT FORMAT — respond with ONLY valid JSON, no markdown:
+{
+  "interactions": [
+    { "pair": ["DrugA", "DrugB"], "severity": "mild|moderate|high", "description": "what happens, in plain language", "advice": "what the patient should do" }
+  ],
+  "foodWarnings": ["e.g. avoid grapefruit with X"],
+  "summary": "one or two sentence overall read",
+  "hasCritical": false
+}
+Set "hasCritical" to true if any interaction is "high".
+`;
+
+router.post("/drug-check", optionalAuth, async (req: any, res: any) => {
+  try {
+    const user = req.user;
+    let medList: string[] = Array.isArray(req.body?.medicines)
+      ? req.body.medicines.filter((m: any) => typeof m === "string" && m.trim()).map((m: string) => m.trim())
+      : [];
+
+    // Fall back to the linked patient's active medicines when none supplied.
+    if (medList.length === 0 && user?.linkedPatientId) {
+      const meds = await db
+        .select()
+        .from(medicines)
+        .where(eq(medicines.patientId, user.linkedPatientId));
+      medList = meds.map((m) => `${m.name}${m.dosage ? ` ${m.dosage}` : ""}`);
+    }
+
+    // De-dupe and cap to keep the prompt bounded.
+    medList = Array.from(new Set(medList)).slice(0, 30);
+
+    if (medList.length < 2) {
+      return res.json({
+        interactions: [],
+        foodWarnings: [],
+        summary: "Add at least two medicines to check for interactions.",
+        hasCritical: false,
+        medicinesChecked: medList,
+      });
+    }
+
+    if (!GROQ_API_KEY || GROQ_API_KEY.includes("your_")) {
+      return res.status(500).json({ error: "Drug interaction checking is not configured on the server." });
+    }
+
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: DRUG_CHECK_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: `Patient's current medicines:\n${medList.map((m, i) => `${i + 1}. ${m}`).join("\n")}\n\nScreen this list for interactions and respond in the required JSON format.`,
+        },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+    });
+
+    const raw = completion.choices[0]?.message?.content || "{}";
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = { interactions: [], foodWarnings: [], summary: "Unable to analyse interactions right now.", hasCritical: false };
+    }
+
+    const interactions = Array.isArray(parsed.interactions) ? parsed.interactions : [];
+    return res.json({
+      interactions,
+      foodWarnings: Array.isArray(parsed.foodWarnings) ? parsed.foodWarnings : [],
+      summary: typeof parsed.summary === "string" ? parsed.summary : "",
+      hasCritical: interactions.some((i: any) => i?.severity === "high"),
+      medicinesChecked: medList,
+    });
+  } catch (error: any) {
+    console.error("[Drug Check Error]", error?.message || error);
+    return res.status(500).json({ error: "Failed to check drug interactions.", details: error?.message });
+  }
+});
+
+/**
  * @route POST /api/ai/test-push
  * @desc Manually trigger a push notification to the logged-in user
  */
@@ -364,9 +471,36 @@ router.post("/test-push", requireAuth, async (req: any, res: any) => {
  * @route POST /api/ai/intent
  * @desc Classify a user's natural language command into an actionable app intent
  */
+// Voice Emergency Mode — deterministic server-side guard. The small intent
+// model is unreliable on safety-critical phrasing, so distress words and
+// critical danger signs short-circuit straight to TRIGGER_EMERGENCY (also
+// saves a round-trip to the LLM).
+const EMERGENCY_INTENT_PHRASES = [
+  "help me", "help help", "emergency", "sos", "save me", "i need help", "call for help",
+  "call ambulance", "call an ambulance", "i'm dying", "im dying",
+  "chest pain", "chest pressure", "can't breathe", "cant breathe", "cannot breathe",
+  "difficulty breathing", "trouble breathing", "short of breath",
+  "heart attack", "stroke", "slurred speech", "face drooping", "severe bleeding",
+  "i collapsed", "i'm choking", "im choking", "unconscious",
+  "bachao", "madad", "मदद", "बचाओ", "सीने में दर्द", "साँस नहीं", "दिल का दौरा",
+  "ayuda", "emergencia", "dolor de pecho", "no puedo respirar",
+  "مدد", "بچاؤ", "বাঁচাও", "সাহায্য", "বুকে ব্যথা",
+];
+
+function isEmergencyIntent(text: string): boolean {
+  const t = String(text).toLowerCase().trim();
+  if (!t) return false;
+  if (t === "help" || t === "emergency" || t === "sos") return true;
+  return EMERGENCY_INTENT_PHRASES.some((p) => t.includes(p));
+}
+
 router.post("/intent", optionalAuth, async (req: any, res: any) => {
   const { text, context } = req.body;
   if (!text) return res.status(400).json({ error: "Text is required" });
+
+  if (isEmergencyIntent(text)) {
+    return res.json({ intent: "ACTION", target: "TRIGGER_EMERGENCY", metadata: {}, confidence: 0.99 });
+  }
 
   try {
     const response = await groq.chat.completions.create({
@@ -377,7 +511,7 @@ router.post("/intent", optionalAuth, async (req: any, res: any) => {
           content: `You are the command router for "Buddy", the voice assistant inside a medical recovery app called Discharge Buddy.
 Map the user's natural-language speech to ONE app action.
 Return ONLY valid JSON. No prose, no markdown.
-Format: {"intent": "NAVIGATE" | "ACTION" | "CHAT" | "UNKNOWN", "target": "TARGET", "confidence": 0.0_to_1.0}
+Format: {"intent": "NAVIGATE" | "ACTION" | "CHAT" | "UNKNOWN", "target": "TARGET", "metadata": {"symptom": "extracted symptom if applicable", "severity": "extracted severity 1-10 if applicable, null if none", "timerMinutes": "number of minutes if applicable, null if none", "isMeditation": boolean}, "confidence": 0.0_to_1.0}
 
 NAVIGATE targets (just move the user to a screen):
 - "medicines"      (go to medicines / show my meds / medicine list)
@@ -394,12 +528,13 @@ NAVIGATE targets (just move the user to a screen):
 - "emergency"      (emergency screen / SOS screen)
 - "home"           (home / dashboard / main screen)
 - "family"         (family dashboard / family view / my family members / caregiver dashboard)
+- "meditation"     (open meditation timer / calm session without setting a specific time)
 
 ACTION targets (do something, not just navigate):
 - "TAKE_MEDICINE"     (I took my medicine / I took my pill / mark my dose as taken / log my medicine)
-- "LOG_SYMPTOM"       (I have pain / log a symptom / I'm not feeling well / record a symptom)
+- "LOG_SYMPTOM"       (I have pain / log a symptom / I'm feeling dizzy / headache today / record nausea). *IMPORTANT*: Implicit symptom statements like "I'm feeling dizzy" MUST map to LOG_SYMPTOM. Try to infer severity (1-10): mild/very mild=3, moderate=5, strong=7, severe=8, unbearable=10. EXCEPTION: critical danger signs (see TRIGGER_EMERGENCY) must map to TRIGGER_EMERGENCY, NOT LOG_SYMPTOM.
 - "ADD_MEDICINE"      (add a medicine manually / new medicine)
-- "TRIGGER_EMERGENCY" (call for help now / this is an emergency / I need help urgently / SOS)
+- "TRIGGER_EMERGENCY" (Voice Emergency Mode — highest priority. Map here for: bare distress words like "help", "emergency", "SOS", "save me", "call an ambulance"; explicit urgency like "this is an emergency / I need help urgently"; AND critical danger signs spoken as a complaint: "chest pain", "chest pressure", "I can't breathe / difficulty breathing", "heart attack", "stroke", "slurred speech", "face drooping", "severe bleeding", "I'm choking", "I collapsed". When in doubt between a life-threatening symptom and logging it, choose TRIGGER_EMERGENCY.)
 - "LOGOUT"            (log me out / sign out)
 - "LANG_EN"           (change language to english / speak english)
 - "LANG_HI"           (change language to hindi / hindi me baat karo)
@@ -407,27 +542,34 @@ ACTION targets (do something, not just navigate):
 - "LANG_UR"           (change language to urdu)
 - "LANG_BN"           (change language to bengali / speak bengali / bangla / বাংলায় বলো)
 - "SEND_NOTE_TO_FAMILY" (tell my daughter / send a message to family / let my son know / tell my caregiver / inform family / notify my family that)
+- "SET_TIMER"         (remind me in X minutes / set medicine timer / meditate for 20 minutes). Extract timerMinutes. Set isMeditation to true if it's for meditation.
 
 CHAT intent (a question, feeling, or chit-chat that needs a spoken answer, NOT an app action):
-- Use {"intent":"CHAT","target":"","confidence":0.9} for things like
+- Use {"intent":"CHAT","target":"","metadata":{},"confidence":0.9} for things like
   "how are you", "what should I eat", "I feel sad", "what is this medicine for",
   "tell me about my recovery", "good morning".
 
-If nothing fits and it is not conversational, use {"intent":"UNKNOWN","target":"","confidence":0.2}.
+If nothing fits and it is not conversational, use {"intent":"UNKNOWN","target":"","metadata":{},"confidence":0.2}.
 
-Context: the user is currently on screen: ${context || "unknown"}
+Context: the user is currently on screen: \${context || "unknown"}
 
 Examples:
-"take me to the scan page"        -> {"intent":"NAVIGATE","target":"scan","confidence":0.95}
-"show my progress"                -> {"intent":"NAVIGATE","target":"progress","confidence":0.94}
-"I took my morning pill"          -> {"intent":"ACTION","target":"TAKE_MEDICINE","confidence":0.93}
-"I have a headache"               -> {"intent":"ACTION","target":"LOG_SYMPTOM","confidence":0.9}
-"log me out"                      -> {"intent":"ACTION","target":"LOGOUT","confidence":0.95}
-"change language to hindi"        -> {"intent":"ACTION","target":"LANG_HI","confidence":0.95}
-"speak bengali"                   -> {"intent":"ACTION","target":"LANG_BN","confidence":0.95}
-"how are you feeling today buddy" -> {"intent":"CHAT","target":"","confidence":0.9}
-"asdfghjkl"                       -> {"intent":"UNKNOWN","target":"","confidence":0.2}
-`
+"I want to meditate for 20 minutes" -> {"intent":"ACTION","target":"SET_TIMER","metadata":{"timerMinutes":20,"isMeditation":true},"confidence":0.95}
+"Remind me in 30 minutes"         -> {"intent":"ACTION","target":"SET_TIMER","metadata":{"timerMinutes":30,"isMeditation":false},"confidence":0.95}
+"take me to the scan page"        -> {"intent":"NAVIGATE","target":"scan","metadata":{},"confidence":0.95}
+"show my progress"                -> {"intent":"NAVIGATE","target":"progress","metadata":{},"confidence":0.94}
+"I took my morning pill"          -> {"intent":"ACTION","target":"TAKE_MEDICINE","metadata":{},"confidence":0.93}
+"I'm feeling mildly dizzy"        -> {"intent":"ACTION","target":"LOG_SYMPTOM","metadata":{"symptom":"dizziness","severity":3},"confidence":0.95}
+"Severe headache today"           -> {"intent":"ACTION","target":"LOG_SYMPTOM","metadata":{"symptom":"headache","severity":8},"confidence":0.95}
+"Help"                            -> {"intent":"ACTION","target":"TRIGGER_EMERGENCY","metadata":{},"confidence":0.97}
+"Emergency"                       -> {"intent":"ACTION","target":"TRIGGER_EMERGENCY","metadata":{},"confidence":0.97}
+"I have chest pain"               -> {"intent":"ACTION","target":"TRIGGER_EMERGENCY","metadata":{},"confidence":0.95}
+"I can't breathe"                 -> {"intent":"ACTION","target":"TRIGGER_EMERGENCY","metadata":{},"confidence":0.97}
+"I have a stomach ache"           -> {"intent":"ACTION","target":"LOG_SYMPTOM","metadata":{"symptom":"stomach ache","severity":null},"confidence":0.9}
+"log me out"                      -> {"intent":"ACTION","target":"LOGOUT","metadata":{},"confidence":0.95}
+"how are you feeling today buddy" -> {"intent":"CHAT","target":"","metadata":{},"confidence":0.9}
+"asdfghjkl"                       -> {"intent":"UNKNOWN","target":"","metadata":{},"confidence":0.2}`
+
         },
         {
           role: "user",

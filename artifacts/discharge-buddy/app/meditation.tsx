@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet, TouchableOpacity, SafeAreaView, Dimensions, TextInput, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, SafeAreaView, Dimensions, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { TranslateText as Text } from '@/components/TranslateText';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Animated, { 
@@ -37,10 +37,13 @@ const QUOTES = [
 
 export default function MeditationTimerScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
-  const [timeLeft, setTimeLeft] = useState(300); // Default 5 min
-  const [isActive, setIsActive] = useState(false);
-  const [customMin, setCustomMin] = useState('5');
+  
+  const initialDuration = params.duration ? parseInt(params.duration as string, 10) * 60 : 300;
+  const [timeLeft, setTimeLeft] = useState(initialDuration); 
+  const [isActive, setIsActive] = useState(!!params.duration);
+  const [customMin, setCustomMin] = useState(params.duration ? (params.duration as string) : '5');
   const [customSec, setCustomSec] = useState('0');
   const [quote, setQuote] = useState(QUOTES[0]);
 
@@ -133,7 +136,7 @@ export default function MeditationTimerScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.compactContainer}>
           {/* Header */}
           <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
@@ -221,7 +224,7 @@ export default function MeditationTimerScreen() {
           <View style={styles.quoteContainer}>
             <Text style={styles.quoteText}>"{quote}"</Text>
           </View>
-        </ScrollView>
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -232,9 +235,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  scrollContent: {
+  compactContainer: {
     alignItems: 'center',
-    paddingBottom: 40,
+    paddingBottom: 20,
   },
   header: {
     flexDirection: 'row',
@@ -242,7 +245,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     width: '100%',
     paddingHorizontal: 20,
-    marginBottom: 40,
+    marginBottom: 20,
   },
   backBtn: {
     width: 44,
@@ -271,8 +274,8 @@ const styles = StyleSheet.create({
   timerWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    height: ORB_SIZE + 100,
-    marginBottom: 40,
+    height: ORB_SIZE + 60,
+    marginBottom: 20,
   },
   orb: {
     width: ORB_SIZE,
@@ -315,7 +318,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
     paddingHorizontal: 20,
-    marginBottom: 40,
+    marginBottom: 20,
   },
   presetBtn: {
     paddingHorizontal: 16,
@@ -334,7 +337,7 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingHorizontal: 30,
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 20,
   },
   customLabel: {
     fontSize: 14,
@@ -384,8 +387,8 @@ const styles = StyleSheet.create({
 
   controlsContainer: {
     flexDirection: 'row',
-    gap: 20,
-    marginBottom: 60,
+    gap: 10,
+    marginBottom: 20,
   },
   mainBtn: {
     paddingHorizontal: 36,
