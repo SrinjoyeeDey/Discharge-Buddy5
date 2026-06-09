@@ -252,6 +252,32 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
 
+          {role === "patient" && (
+            <TouchableOpacity
+              style={styles.actionRow}
+              onPress={() => router.push("/link-patient")}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: `#ec488315` }]}>
+                <Feather name="users" size={18} color="#ec4883" />
+              </View>
+              <Text style={styles.actionLabel}>Link Family Member</Text>
+              <Feather name="chevron-right" size={18} color="#94a3b8" />
+            </TouchableOpacity>
+          )}
+
+          {role === "family" && (
+            <TouchableOpacity
+              style={styles.actionRow}
+              onPress={() => router.push("/family-dashboard")}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: `#0891b215` }]}>
+                <Feather name="eye" size={18} color={TEAL} />
+              </View>
+              <Text style={styles.actionLabel}>View Patient Status</Text>
+              <Feather name="chevron-right" size={18} color="#94a3b8" />
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             style={styles.actionRow}
             onPress={handleShareReport}

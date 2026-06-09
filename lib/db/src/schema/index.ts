@@ -7,6 +7,8 @@ export const riskLevelEnum = pgEnum("risk_level", ["low", "medium", "high"]);
 export const doseStatusEnum = pgEnum("dose_status", ["taken", "missed", "pending", "snoozed"]);
 export const linkRelationshipEnum = pgEnum("link_relationship", ["family", "caregiver"]);
 export const linkStatusEnum = pgEnum("link_status", ["active", "revoked"]);
+export const familyLinkStatusEnum = pgEnum("family_link_status", ["pending", "accepted", "rejected"]);
+export const patientStatusEnum = pgEnum("patient_status", ["stable", "improving", "declining", "critical", "in-hospital", "discharged"]);
 export const bloodTypeEnum = pgEnum("blood_type", ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]);
 export const bloodUrgencyEnum = pgEnum("blood_urgency", ["low", "normal", "critical"]);
 export const bloodRequestStatusEnum = pgEnum("blood_request_status", ["open", "fulfilled", "cancelled"]);
@@ -240,6 +242,31 @@ export const bloodRequests = pgTable("blood_requests", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Family Emergency Dashboard — family members linked to a patient for emergency updates
+export const familyLinks = pgTable("family_links", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  patientUserId: uuid("patient_user_id").references(() => users.id).notNull(),
+  familyUserId: uuid("family_user_id").references(() => users.id).notNull(),
+  relationship: text("relationship"), // e.g., "spouse", "parent", "sibling", "child"
+  status: familyLinkStatusEnum("status").default("pending").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  acceptedAt: timestamp("accepted_at"),
+}, (t) => ({
+  uniqLink: unique("family_links_patient_family_unique").on(t.patientUserId, t.familyUserId),
+}));
+
+// Patient Status Updates — timeline of patient recovery/hospital updates for family
+export const patientStatusUpdates = pgTable("patient_status_updates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  patientUserId: uuid("patient_user_id").references(() => users.id).notNull(),
+  hospitalName: text("hospital_name"),
+  currentStatus: patientStatusEnum("current_status").notNull(), // stable, improving, declining, critical, etc.
+  statusNote: text("status_note"), // "Discharge date moved to Dec 15", "Pain levels improving", etc.
+  updatedByUserId: uuid("updated_by_user_id").references(() => users.id), // Who posted the update (patient or caregiver)
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Zod schemas for validation
 export const insertUserSchema = createInsertSchema(users);
 export const selectUserSchema = createSelectSchema(users);
@@ -257,3 +284,7 @@ export const insertFeedbackSchema = createInsertSchema(feedback);
 export const insertDischargePlanSchema = createInsertSchema(dischargePlans);
 export const insertDonorProfileSchema = createInsertSchema(donorProfiles);
 export const insertBloodRequestSchema = createInsertSchema(bloodRequests);
+export const insertFamilyLinkSchema = createInsertSchema(familyLinks);
+export const selectFamilyLinkSchema = createSelectSchema(familyLinks);
+export const insertPatientStatusUpdateSchema = createInsertSchema(patientStatusUpdates);
+export const selectPatientStatusUpdateSchema = createSelectSchema(patientStatusUpdates);
