@@ -1,19 +1,12 @@
 import { Router } from "express";
-import { db, users, familyLinks, patientStatusUpdates, patients, eq, and, desc } from "@workspace/db";
+import { db, users, familyLinks, patientStatusUpdates, patients, eq, and, desc, isNull, ne } from "@workspace/db";
 import type { AuthRequest } from "../middlewares/auth";
 import { requireAuth } from "../middlewares/auth";
-import { FamilyController } from "../controllers/familyController";
 import { logger } from "../lib/logger";
 import { sendVerificationEmail } from "../lib/email";
 
 const router = Router();
-
 router.use(requireAuth);
-
-// Existing family member routes
-router.get("/members", FamilyController.getMembers);
-router.post("/members", FamilyController.addMember);
-router.post("/members/link", FamilyController.linkMember);
 
 /**
  * POST /api/family/link

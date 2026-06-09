@@ -64,7 +64,7 @@ export class ApiProvider implements IDataProvider {
     const res = await customFetch<{ data: FollowUp[] }>("/api/followups/");
     return res.data;
   }
-  
+
   async addFollowUp(followUp: FollowUp): Promise<void> {
     await customFetch("/api/followups/", {
       method: "POST",
@@ -323,6 +323,49 @@ export class ApiProvider implements IDataProvider {
     return await customFetch<DrugCheckResult>("/api/ai/drug-check", {
       method: "POST",
       body: JSON.stringify({ medicines: medicines ?? [] }),
+    });
+  }
+
+  // ─── Family Emergency Dashboard ─────────────────────────────────────────────
+  async linkPatientByEmail(familyEmail: string, relationship: string): Promise<{ success: boolean; link: any; message: string }> {
+    return await customFetch<{ success: boolean; link: any; message: string }>("/api/family/link", {
+      method: "POST",
+      body: JSON.stringify({ familyEmail, relationship }),
+    });
+  }
+
+  async acceptFamilyLink(linkId: string): Promise<{ success: boolean; link: any; message: string }> {
+    return await customFetch<{ success: boolean; link: any; message: string }>(`/api/family/link/${linkId}/accept`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  async rejectFamilyLink(linkId: string): Promise<{ success: boolean; message: string }> {
+    return await customFetch<{ success: boolean; message: string }>(`/api/family/link/${linkId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  async getFamilyDashboard(patientUserId: string): Promise<any> {
+    return await customFetch<any>(`/api/family/dashboard/${patientUserId}`);
+  }
+
+  async postStatusUpdate(patientUserId: string, currentStatus: string, hospitalName?: string, statusNote?: string): Promise<{ success: boolean; statusUpdate: any; message: string }> {
+    return await customFetch<{ success: boolean; statusUpdate: any; message: string }>("/api/family/status-update", {
+      method: "POST",
+      body: JSON.stringify({ patientUserId, hospitalName, currentStatus, statusNote }),
+    });
+  }
+
+  async getMyFamilyLinks(): Promise<{ linksAsPatient: any[]; linksAsFamily: any[] }> {
+    return await customFetch<{ linksAsPatient: any[]; linksAsFamily: any[] }>("/api/family/my-links");
+  }
+
+  async removeFamilyLink(linkId: string): Promise<{ success: boolean; message: string }> {
+    return await customFetch<{ success: boolean; message: string }>(`/api/family/link/${linkId}`, {
+      method: "DELETE",
     });
   }
 
