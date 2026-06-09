@@ -18,6 +18,7 @@ import familyRouter from "./family";
 import linksRouter from "./links";
 import voiceNotesRouter from "./voiceNotes";
 import bloodNetworkRouter from "./bloodNetwork";
+import medicalCardRouter from "./medicalCard";
 
 const router: IRouter = Router();
 
@@ -43,5 +44,6 @@ router.use("/family", familyRouter);
 router.use("/links", linksRouter);
 router.use("/voice-notes", voiceNotesRouter);
 router.use("/blood", bloodNetworkRouter);
+router.use("/medical-card", medicalCardRouter);
 
 export default router;

@@ -220,9 +220,27 @@ export default function ProfileScreen() {
         </View>
 
         {role === "patient" && (
-          <View style={{ paddingHorizontal: 20, marginTop: 16 }}>
-            <MyLinkCodeCard />
-          </View>
+          <>
+            <View style={{ paddingHorizontal: 20, marginTop: 16 }}>
+              <MyLinkCodeCard />
+            </View>
+
+            <View style={{ paddingHorizontal: 20, marginTop: 16 }}>
+              <TouchableOpacity
+                style={styles.medicalCardBtn}
+                onPress={() => router.push("/medical-card")}
+              >
+                <View style={styles.medicalCardIcon}>
+                  <Feather name="heart" size={20} color={WHITE} />
+                </View>
+                <View style={styles.medicalCardContent}>
+                  <Text style={styles.medicalCardTitle}>Medical Emergency Card</Text>
+                  <Text style={styles.medicalCardDesc}>QR code for emergency responders</Text>
+                </View>
+                <Feather name="chevron-right" size={18} color={WHITE} />
+              </TouchableOpacity>
+            </View>
+          </>
         )}
 
         <View style={styles.actions}>
@@ -486,5 +504,42 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
     color: TEAL_DARK,
+  },
+  medicalCardBtn: {
+    backgroundColor: "linear-gradient(135deg, #e63e3e 0%, #dc2626 100%)",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    shadowColor: "#ef4444",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1.5,
+    borderColor: "rgba(239, 68, 68, 0.3)",
+  },
+  medicalCardIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  medicalCardContent: {
+    flex: 1,
+  },
+  medicalCardTitle: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: WHITE,
+  },
+  medicalCardDesc: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.85)",
   },
 });

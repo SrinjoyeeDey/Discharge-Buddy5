@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
+import publicRouter from "./routes/publicRoutes";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
@@ -31,6 +32,10 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 app.get("/", (req, res) => res.send("OK"));
 
+// Public routes (no auth required)
+app.use("/public", publicRouter);
+
+// Protected API routes
 app.use("/api", router);
 
 export default app;
