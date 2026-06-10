@@ -240,6 +240,34 @@ export const bloodRequests = pgTable("blood_requests", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Medical QR Emergency Card — public-facing emergency medical info for each patient
+export const medicalCards = pgTable("medical_cards", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  patientId: uuid("patient_id").references(() => patients.id).notNull(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  // Medical data (already exists on user, but stored here for easy QR encoding)
+  bloodType: text("blood_type"),
+  allergies: text("allergies"), // comma-separated or freeform
+  diseases: text("diseases"), // comma-separated list of medical conditions
+  currentMedications: jsonb("current_medications"), // array of { name, dosage, frequency }
+  emergencyContactName: text("emergency_contact_name"),
+  emergencyContactPhone: text("emergency_contact_phone"),
+  // QR code data (generated on-demand, cached here)
+  qrCodeValue: text("qr_code_value"), // JSON-encoded data that the QR represents
+  qrCodeHash: varchar("qr_code_hash", { length: 64 }), // SHA256 hash of qrCodeValue for lookup
+  // Visibility & access
+  isPublic: boolean("is_public").default(true).notNull(), // whether emergency responders can view it
+  accessedAt: timestamp("accessed_at"), // last time someone scanned/viewed it
+  accessCount: integer("access_count").default(0).notNull(), // how many times accessed
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => ({
+  // Unique: one medical card per patient
+  uniqPatient: unique("medical_cards_patient_unique").on(t.patientId),
+  // Index for QR code hash lookups (emergency responders scan)
+  qrHashIdx: unique("medical_cards_qr_hash_unique").on(t.qrCodeHash),
+}));
+
 // Zod schemas for validation
 export const insertUserSchema = createInsertSchema(users);
 export const selectUserSchema = createSelectSchema(users);
@@ -257,3 +285,5 @@ export const insertFeedbackSchema = createInsertSchema(feedback);
 export const insertDischargePlanSchema = createInsertSchema(dischargePlans);
 export const insertDonorProfileSchema = createInsertSchema(donorProfiles);
 export const insertBloodRequestSchema = createInsertSchema(bloodRequests);
+export const insertMedicalCardSchema = createInsertSchema(medicalCards);
+export const selectMedicalCardSchema = createSelectSchema(medicalCards);

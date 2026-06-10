@@ -64,7 +64,7 @@ export class ApiProvider implements IDataProvider {
     const res = await customFetch<{ data: FollowUp[] }>("/api/followups/");
     return res.data;
   }
-  
+
   async addFollowUp(followUp: FollowUp): Promise<void> {
     await customFetch("/api/followups/", {
       method: "POST",
@@ -323,6 +323,38 @@ export class ApiProvider implements IDataProvider {
     return await customFetch<DrugCheckResult>("/api/ai/drug-check", {
       method: "POST",
       body: JSON.stringify({ medicines: medicines ?? [] }),
+    });
+  }
+
+  // ─── Medical QR Emergency Card ──────────────────────────────────────────────
+  async getMedicalCard(): Promise<any> {
+    return await customFetch("/api/medical-card");
+  }
+
+  async saveMedicalCard(data: {
+    bloodType: string;
+    allergies?: string;
+    diseases?: string;
+    emergencyContactName?: string;
+    emergencyContactPhone: string;
+  }): Promise<any> {
+    const res = await customFetch<{ card: any }>("/api/medical-card", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return res.card;
+  }
+
+  async regenerateMedicalCardQR(): Promise<any> {
+    const res = await customFetch<{ card: any }>("/api/medical-card/regenerate", {
+      method: "POST",
+    });
+    return res.card;
+  }
+
+  async deleteMedicalCard(): Promise<void> {
+    await customFetch("/api/medical-card", {
+      method: "DELETE",
     });
   }
 
