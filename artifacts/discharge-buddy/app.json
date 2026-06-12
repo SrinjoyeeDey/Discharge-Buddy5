@@ -15,12 +15,11 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.dischargebuddy.app"
+      "bundleIdentifier": "com.dischargebuddy2.app"
     },
     "android": {
-      "package": "com.dischargebuddy.app",
-      "googleServicesFile": "./assets/google-services.json",
-      "usesCleartextTraffic": true
+      "package": "com.dischargebuddy2.app",
+      "googleServicesFile": "./assets/google-services.json"
     },
     "web": {
       "favicon": "./assets/images/icon.png"
@@ -45,11 +44,11 @@
       "typedRoutes": true,
       "reactCompiler": false
     },
+    "owner": "srinzz",
     "extra": {
       "eas": {
-        "projectId": "4b706efc-e53f-43ff-9868-2ce5c8e9181a"
+        "projectId": "a14b7a0e-1e2a-4da7-86ac-59fa0d4fe738"
       }
-    },
-    "owner": "user403"
+    }
   }
 }

@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "89f92cb1-94b7-427d-9950-93a78d30dd54"
+      }
+    },
+    "android": {
+      "package": "com.srinzz.workspace"
+    }
+  }
+}

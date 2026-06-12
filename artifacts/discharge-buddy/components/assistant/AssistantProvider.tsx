@@ -200,7 +200,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const [isVisible, setIsVisible] = useState(false);
   const [lastTranscript, setLastTranscript] = useState<string | null>(null);
   const [lastReply, setLastReply] = useState<string | null>(null);
-  const [symptomFallback, setSymptomFallback] = useState<{symptom: string, lang: string} | null>(null);
+  const [symptomFallback, setSymptomFallback] = useState<{ symptom: string, lang: string } | null>(null);
   const [fallbackValue, setFallbackValue] = useState<number>(5);
 
   const { activeModule } = useAssistantContext();
@@ -264,7 +264,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
           try {
             Speech.stop();
             Speech.speak(clean, {
-              language: localeOverride || LOCALE_BY_LANG[language] || 'en-US',
+              language: localeOverride || LOCALE_BY_LANG[language as Language] || 'en-US',
               pitch: 1.0,
               rate: 0.95,
               onDone: () => { clearTimeout(timeoutId); safeResolve(); },
@@ -297,7 +297,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
           );
           assistantSoundRef.current = sound;
 
-          sound.setOnPlaybackStatusUpdate((status) => {
+          sound.setOnPlaybackStatusUpdate((status: any) => {
             if (!status.isLoaded) {
               if ((status as any).error) { clearTimeout(timeoutId); safeResolve(); }
               return;
@@ -343,16 +343,16 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         case 'TAKE_MEDICINE': {
           const lowerTranscript = currentTranscript.toLowerCase();
           const isAll = lowerTranscript.includes('all');
-          let pendingDoses = todayDoses.filter((d) => d.status === 'pending');
+          let pendingDoses = todayDoses.filter((d: any) => d.status === 'pending');
 
           if (pendingDoses.length === 0) {
             reply = `I don't see any pending doses right now — you're all caught up!`;
           } else {
-            const mentionedMed = pendingDoses.find(d => lowerTranscript.includes(d.medicineName.toLowerCase()));
+            const mentionedMed = pendingDoses.find((d: any) => lowerTranscript.includes(d.medicineName.toLowerCase()));
 
-            let dosesToMark = [];
+            let dosesToMark: typeof todayDoses = [];
             if (mentionedMed && isAll) {
-              dosesToMark = pendingDoses.filter(d => d.medicineName.toLowerCase() === mentionedMed.medicineName.toLowerCase());
+              dosesToMark = pendingDoses.filter((d: any) => d.medicineName.toLowerCase() === mentionedMed.medicineName.toLowerCase());
             } else if (mentionedMed) {
               dosesToMark = [mentionedMed];
             } else if (isAll) {
@@ -362,8 +362,8 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
             }
 
             try {
-              await Promise.all(dosesToMark.map(d => updateDoseStatus(d.id, 'taken')));
-              const names = Array.from(new Set(dosesToMark.map(d => d.medicineName))).join(' and ');
+              await Promise.all(dosesToMark.map((d: any) => updateDoseStatus(d.id, 'taken')));
+              const names = Array.from(new Set(dosesToMark.map((d: any) => d.medicineName))).join(' and ');
               reply = `Done. I've marked ${names} as taken. Great job staying on track!`;
             } catch {
               reply = `I couldn't update those doses just now. Please try from the medicines screen.`;
@@ -385,7 +385,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         case 'LOG_SYMPTOM': {
-          const activeLang = isBengaliText(currentTranscript) ? 'bn' : (isHindiText(currentTranscript) ? 'hi' : language);
+          const activeLang = (isBengaliText(currentTranscript) ? 'bn' : (isHindiText(currentTranscript) ? 'hi' : language)) as Language;
           const symptomKey = metadata?.symptom || extractSymptom(currentTranscript, activeLang);
           const severity = metadata?.severity;
 
@@ -587,7 +587,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const handleChat = useCallback(
     async (text: string): Promise<void> => {
       setState('processing');
-      const activeLang = isBengaliText(text) ? 'bn' : (isHindiText(text) ? 'hi' : language);
+      const activeLang = (isBengaliText(text) ? 'bn' : (isHindiText(text) ? 'hi' : language)) as Language;
       let message = "I'm right here with you.";
       try {
         // Share the same persisted memory as the chat screen (Phase 5), and tell
@@ -636,7 +636,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     const digitMatch = cleanText.match(/(10|[1-9]|১০|[১-৯])/);
     if (digitMatch) {
       const bnToEn: Record<string, number> = {
-        '১': 1, '২': 2, '৩': 3, '৪': 4, '৫': 5, 
+        '১': 1, '২': 2, '৩': 3, '৪': 4, '৫': 5,
         '৬': 6, '৭': 7, '৮': 8, '৯': 9, '১০': 10
       };
       severity = bnToEn[digitMatch[0]] || parseInt(digitMatch[0], 10);
@@ -704,7 +704,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         cancelAssistant();
         return;
       }
-      
+
       (pendingSymptomLogRef.current as any).retries = retries + 1;
 
       let reply = '';
@@ -847,7 +847,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   // stomp the processing/speaking phases the pipeline drives explicitly.
   useEffect(() => {
     if (sessionError) {
-      setState((s) => (s === 'speaking' ? s : 'error'));
+      setState((s: AssistantState) => (s === 'speaking' ? s : 'error'));
     } else if (isTranscribing) {
       setState('transcribing');
     } else if (isListening) {
@@ -875,7 +875,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const processText = useCallback(async (text: string) => {
     setIsVisible(true);
     await stopAssistantSpeech();
-    await stopSpeaking().catch(() => {});
+    await stopSpeaking().catch(() => { });
     await stopSession(); // stop mic if running
     await handleTranscriptRef.current(text);
   }, [stopAssistantSpeech, stopSpeaking, stopSession]);
@@ -951,8 +951,8 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
             </Text>
             <View style={styles.chipsContainer}>
               {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
-                <TouchableOpacity 
-                  key={n} 
+                <TouchableOpacity
+                  key={n}
                   style={[styles.chip, fallbackValue === n && styles.chipActive]}
                   onPress={() => setFallbackValue(n)}
                 >
@@ -960,13 +960,13 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.confirmBtn}
               onPress={async () => {
                 if (!symptomFallback) return;
                 const { symptom, lang } = symptomFallback;
                 setSymptomFallback(null);
-                
+
                 // Process the selected value through the existing logic
                 pendingSymptomLogRef.current = { symptom, lang };
                 await handleSymptomSeverityRating(fallbackValue.toString());

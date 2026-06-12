@@ -524,8 +524,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const token = await AsyncStorage.getItem("discharge_buddy_token");
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       
-      if (dataProvider instanceof MockProvider) {
-          setDataProvider(new ApiProvider());
+      if (token === "demo_token_123") {
+        setDataProvider(new MockProvider());
+      } else {
+        setDataProvider(new ApiProvider());
       }
 
       // Request notification permission on native (local notifications work in Expo Go, remote push does not)
@@ -548,8 +550,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // No dummy seed data — notifications populate from real app events.
       }
       
-      // Register push token if logged in
-      if (token) {
+      // Register push token if logged in (skip for demo users)
+      if (token && token !== "demo_token_123") {
         const pushToken = await getDevicePushToken();
         if (pushToken && dataProvider.registerPushToken) {
           await dataProvider.registerPushToken(pushToken).catch(console.error);
@@ -1065,7 +1067,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setAuthMethodState(method);
     setRoleState(userData.role);
     setIsOnboardedState(true);
-    setDataProvider(new ApiProvider());
+    
+    const isDemo = token === "demo_token_123";
+    setDataProvider(isDemo ? new MockProvider() : new ApiProvider());
 
     await saveData({
       user: userData,
@@ -1074,25 +1078,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       isOnboarded: true
     });
 
-    // Register Push Token with Backend
-
-    // Register Push Token with Backend
-    try {
-      const pushToken = await getDevicePushToken();
-      if (pushToken) {
-        const apiUrl = process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000";
-        await fetch(`${apiUrl}/api/auth/push-token`, {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-          body: JSON.stringify({ token: pushToken })
+    // Register Push Token with Backend asynchronously (skip for demo users)
+    if (!isDemo) {
+      getDevicePushToken()
+        .then(async (pushToken) => {
+          if (pushToken) {
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000";
+            await fetch(`${apiUrl}/api/auth/push-token`, {
+              method: "POST",
+              headers: { 
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`
+              },
+              body: JSON.stringify({ token: pushToken })
+            });
+            console.log("Push token registered successfully with backend");
+          }
+        })
+        .catch((err) => {
+          console.warn("Failed to register push token during login:", err);
         });
-        console.log("Push token registered successfully with backend");
-      }
-    } catch (err) {
-      console.warn("Failed to register push token during login:", err);
     }
   };
 
